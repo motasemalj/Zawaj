@@ -12,6 +12,7 @@ import GradientBackground from '../components/ui/GradientBackground';
 import Avatar from '../components/ui/Avatar';
 import MatchModal from '../components/MatchModal';
 import ProfileDetailModal from '../components/ProfileDetailModal';
+import { feedback } from '../utils/haptics';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SWIPE_THRESHOLD = 120;
@@ -535,6 +536,9 @@ export default function EnhancedDiscoveryScreen() {
     // Lock swiping
     isSwipingRef.current = true;
 
+    // Add haptic feedback for swipe
+    feedback.swipe();
+
     // Save current profile for undo functionality
     setLastSwipedProfile(profile);
     setCanUndo(true);
@@ -557,6 +561,9 @@ export default function EnhancedDiscoveryScreen() {
         
         setMatchedUser(profile);
         setMatchId(res.data.match.id);
+        
+        // Add match celebration feedback
+        feedback.match();
         
         // Show modal almost instantly for maximum excitement!
         setTimeout(() => {
@@ -647,6 +654,9 @@ export default function EnhancedDiscoveryScreen() {
 
     try {
       console.log('🔙 UNDOING SWIPE for profile:', lastSwipedProfile.id);
+      
+      // Add haptic feedback for undo
+      feedback.buttonPress();
       
       // Call backend to undo
       const res = await api.post('/swipes/undo');

@@ -9,6 +9,7 @@ import ProgressBar from '../../components/ui/ProgressBar';
 import GradientBackground from '../../components/ui/GradientBackground';
 import { getClient } from '../../api/client';
 import { BlurView } from 'expo-blur';
+import PhotoPickerModal from '../../components/ui/PhotoPickerModal';
 
 type Step3Props = {
   onComplete: (images: string[]) => void;
@@ -19,6 +20,7 @@ export default function Step3ProfilePhotos({ onComplete, onBack }: Step3Props) {
   const [images, setImages] = useState<string[]>([]);
   const [photosBlurred, setPhotosBlurred] = useState(false);
   const [updatingBlur, setUpdatingBlur] = useState(false);
+  const [showPhotoPicker, setShowPhotoPicker] = useState(false);
   const insets = useSafeAreaInsets();
 
   const MAX_PHOTOS = 6;
@@ -33,30 +35,16 @@ export default function Step3ProfilePhotos({ onComplete, onBack }: Step3Props) {
     })();
   }, []);
 
-  const pickImages = async () => {
+  const showPhotoPickerModal = () => {
+    setShowPhotoPicker(true);
+  };
+
+  const handleImageSelected = (uri: string) => {
     if (images.length >= MAX_PHOTOS) {
       Alert.alert('الحد الأقصى للصور', `يمكنك تحميل ${MAX_PHOTOS} صور كحد أقصى.`);
       return;
     }
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('إذن مطلوب', 'إذن مكتبة الصور مطلوب.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [3, 4],
-      quality: 0.8,
-      allowsMultipleSelection: true,
-    });
-
-    if (!result.canceled && result.assets) {
-      const newImages = result.assets.slice(0, MAX_PHOTOS - images.length).map(asset => asset.uri);
-      setImages([...images, ...newImages]);
-    }
+    setImages(prev => [...prev, uri]);
   };
 
   const removeImage = (index: number) => {
@@ -126,7 +114,7 @@ export default function Step3ProfilePhotos({ onComplete, onBack }: Step3Props) {
 
           <View style={styles.photosGrid}>
             {images.length < MAX_PHOTOS && (
-              <TouchableOpacity style={styles.addPhotoButton} onPress={pickImages} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.addPhotoButton} onPress={showPhotoPickerModal} activeOpacity={0.8}>
                 <View style={styles.addPhotoContent}>
                   <Ionicons name="image-outline" size={26} color={colors.accent} />
                   <Text style={styles.addPhotoText}>أضف صورة</Text>
@@ -184,6 +172,14 @@ export default function Step3ProfilePhotos({ onComplete, onBack }: Step3Props) {
           />
         </View>
       </ScrollView>
+      
+      <PhotoPickerModal
+        visible={showPhotoPicker}
+        onClose={() => setShowPhotoPicker(false)}
+        onImageSelected={handleImageSelected}
+        maxPhotos={MAX_PHOTOS}
+        currentPhotoCount={images.length}
+      />
     </GradientBackground>
   );
 }

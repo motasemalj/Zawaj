@@ -9,6 +9,7 @@ import GradientBackground from '../components/ui/GradientBackground';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileDetailModal from '../components/ProfileDetailModal';
 import { Ionicons } from '@expo/vector-icons';
+import { feedback } from '../utils/haptics';
 
 export default function MatchesScreen() {
   const currentUserId = useApiState((state) => state.currentUserId);
@@ -17,6 +18,7 @@ export default function MatchesScreen() {
   const insets = useSafeAreaInsets();
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [unmatchingId, setUnmatchingId] = useState<string | null>(null);
 
   const { data, refetch, isFetching } = useQuery({
     queryKey: ['matches'],
@@ -28,6 +30,37 @@ export default function MatchesScreen() {
       refetch();
     }, [refetch])
   );
+
+  const handleUnmatch = async (matchId: string, userName: string) => {
+    // Add haptic feedback for unmatch button press
+    feedback.important();
+    
+    Alert.alert(
+      'إلغاء التوافق',
+      `هل أنت متأكد من إلغاء التوافق مع ${userName}؟\n\nسيتم حذف جميع المحادثات نهائياً.`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'إلغاء التوافق',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setUnmatchingId(matchId);
+              await api.delete(`/matches/${matchId}`);
+              refetch(); // Refresh the matches list
+              // Add success feedback
+              feedback.success();
+            } catch (error: any) {
+              feedback.error();
+              Alert.alert('خطأ', error.response?.data?.message || 'فشل في إلغاء التوافق');
+            } finally {
+              setUnmatchingId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const matches = React.useMemo(() => {
     const rawMatches = data ?? [];
@@ -106,6 +139,17 @@ export default function MatchesScreen() {
                       >
                         <Ionicons name="chatbubble" size={18} color="#000" />
                       </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.unmatchBtn, unmatchingId === item.id && styles.unmatchBtnDisabled]}
+                        onPress={() => handleUnmatch(item.id, other?.display_name || 'هذا الشخص')}
+                        disabled={unmatchingId === item.id}
+                      >
+                        <Ionicons 
+                          name={unmatchingId === item.id ? "hourglass" : "close"} 
+                          size={18} 
+                          color={unmatchingId === item.id ? colors.muted : "#ef4444"} 
+                        />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -174,6 +218,21 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row-reverse', gap: spacing(1), alignItems: 'center' },
   previewBtn: { width: 44, height: 44, borderRadius: radii.lg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   chatBtn: { width: 48, height: 48, borderRadius: radii.lg, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  unmatchBtn: { 
+    width: 44, 
+    height: 44, 
+    borderRadius: radii.lg, 
+    borderWidth: 1, 
+    borderColor: '#ef4444', 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    backgroundColor: '#ef444410'
+  },
+  unmatchBtnDisabled: {
+    borderColor: colors.muted,
+    backgroundColor: colors.surface,
+    opacity: 0.6
+  },
   newMatchBadge: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing(0.5), paddingHorizontal: spacing(1), paddingVertical: spacing(0.5), borderRadius: radii.lg, backgroundColor: colors.chip, alignSelf: 'flex-end' },
   newMatchText: { color: colors.accent, fontSize: 12, fontWeight: '600' },
   emptyState: { marginTop: spacing(6), alignItems: 'center', gap: spacing(1) },

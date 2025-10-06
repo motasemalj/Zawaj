@@ -21,6 +21,7 @@ import Button from '../components/ui/Button';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import Avatar from '../components/ui/Avatar';
 import GradientBackground from '../components/ui/GradientBackground';
+import PhotoPickerModal from '../components/ui/PhotoPickerModal';
 
 interface PhotoItem {
   id: string;
@@ -40,6 +41,7 @@ export default function EnhancedProfileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [options, setOptions] = useState<any>({});
+  const [showPhotoPicker, setShowPhotoPicker] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -124,31 +126,20 @@ export default function EnhancedProfileScreen() {
     }
   }
 
-  async function addPhoto() {
+  function showPhotoPickerModal() {
+    setShowPhotoPicker(true);
+  }
+
+  async function handleImageSelected(uri: string) {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { 
-        setError('يرجى السماح بالوصول للصور'); 
-        return; 
-      }
-      
       if (photos.length >= 5) {
         setError('الحد الأقصى 5 صور');
         return;
       }
       
-      const sel = await ImagePicker.launchImageLibraryAsync({ 
-        allowsMultipleSelection: false, 
-        quality: 0.8,
-        mediaTypes: ['images'],
-        allowsEditing: false,
-      });
-      
-      if (sel.canceled) return;
-      
       const form = new FormData();
       form.append('photos', {
-        uri: sel.assets[0].uri,
+        uri: uri,
         name: 'photo.jpg',
         type: 'image/jpeg',
       } as any);
@@ -393,7 +384,7 @@ export default function EnhancedProfileScreen() {
           </ScrollView>
           
           {photos.length < 5 && (
-            <TouchableOpacity style={styles.addPhotoButton} onPress={addPhoto}>
+            <TouchableOpacity style={styles.addPhotoButton} onPress={showPhotoPickerModal}>
               <Ionicons name="add-circle" size={32} color={colors.accent} />
               <Text style={styles.addPhotoText}>أضف صورة جديدة</Text>
             </TouchableOpacity>
@@ -686,10 +677,18 @@ export default function EnhancedProfileScreen() {
             </View>
           )}
         </View>
-      </ScrollView>
-    </GradientBackground>
-  );
-}
+        </ScrollView>
+        
+        <PhotoPickerModal
+          visible={showPhotoPicker}
+          onClose={() => setShowPhotoPicker(false)}
+          onImageSelected={handleImageSelected}
+          maxPhotos={5}
+          currentPhotoCount={photos.length}
+        />
+      </GradientBackground>
+    );
+  }
 
 function InfoRow({ icon, label, value, locked }: any) {
   return (

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Alert, ActivityIndicator, StyleSheet } from 'react-native';
 import { getClient, useApiState } from '../api/client';
 import { colors } from '../theme';
+import { feedback } from '../utils/haptics';
 
 // Import all step screens
 import Step1NameRole from './onboarding/Step1NameRole';
@@ -65,8 +66,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step1', data);
+      feedback.success();
       setCurrentStep(2);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -77,8 +80,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step2', data);
+      feedback.success();
       setCurrentStep(3);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -107,8 +112,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
       // Mark step 3 as complete
       await api.post('/onboarding/step3');
       
+      feedback.success();
       setCurrentStep(4);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل رفع الصور');
     } finally {
       setLoading(false);
@@ -119,8 +126,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step4', data);
+      feedback.success();
       setCurrentStep(5);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -131,8 +140,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step5', data);
+      feedback.success();
       setCurrentStep(6);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -143,8 +154,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step6', data);
+      feedback.success();
       setCurrentStep(7);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -155,8 +168,10 @@ export default function NewOnboardingScreen({ navigation }: any) {
     try {
       setLoading(true);
       await api.post('/onboarding/step7', data);
+      feedback.success();
       setCurrentStep(8);
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل الحفظ');
     } finally {
       setLoading(false);
@@ -175,6 +190,7 @@ export default function NewOnboardingScreen({ navigation }: any) {
       });
       
       // Mark onboarding as complete
+      feedback.match(); // Special celebration for completing onboarding
       Alert.alert(
         '🎉 مرحباً بك في زواج!',
         'ملفك الشخصي مكتمل الآن. ابدأ في اكتشاف تطابقاتك!',
@@ -186,6 +202,7 @@ export default function NewOnboardingScreen({ navigation }: any) {
         ]
       );
     } catch (e: any) {
+      feedback.error();
       Alert.alert('خطأ', e.response?.data?.error || 'فشل إكمال التسجيل');
     } finally {
       setLoading(false);

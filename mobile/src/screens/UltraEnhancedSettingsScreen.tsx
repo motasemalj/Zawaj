@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import GradientBackground from '../components/ui/GradientBackground';
 import Button from '../components/ui/Button';
 import ErrorMessage from '../components/ui/ErrorMessage';
+import { feedback } from '../utils/haptics';
 
 export default function UltraEnhancedSettingsScreen() {
   const api = getClient();
@@ -135,6 +136,9 @@ export default function UltraEnhancedSettingsScreen() {
 
   async function toggleLocation() {
     try {
+      // Add haptic feedback for toggle
+      feedback.selection();
+      
       if (locationEnabled) {
         Alert.alert(
           'تعطيل الموقع',
@@ -174,6 +178,9 @@ export default function UltraEnhancedSettingsScreen() {
 
   async function toggleNotifications() {
     try {
+      // Add haptic feedback for toggle
+      feedback.selection();
+      
       if (notificationsEnabled) {
         Alert.alert(
           'تعطيل الإشعارات',
@@ -249,6 +256,9 @@ export default function UltraEnhancedSettingsScreen() {
   }
 
   function handleLogout() {
+    // Add haptic feedback for logout button
+    feedback.important();
+    
     Alert.alert(
       'تسجيل الخروج',
       'هل أنت متأكد من تسجيل الخروج؟',
@@ -265,6 +275,9 @@ export default function UltraEnhancedSettingsScreen() {
       return;
     }
 
+    // Add haptic feedback for delete account
+    feedback.important();
+    
     setIsDeleting(true);
     try {
       await api.delete('/users/me');
@@ -275,6 +288,7 @@ export default function UltraEnhancedSettingsScreen() {
         [{ text: 'حسناً', onPress: () => setCurrentUserId(null) }]
       );
     } catch (err: any) {
+      feedback.error();
       setError(err.response?.data?.message || 'فشل حذف الحساب');
       setIsDeleting(false);
     }
@@ -705,7 +719,7 @@ export default function UltraEnhancedSettingsScreen() {
         </View>
 
         {/* Account Actions */}
-        <View style={styles.section}>
+        <View style={styles.accountSection}>
           <Text style={styles.sectionTitle}>إدارة الحساب</Text>
           
           <TouchableOpacity 
@@ -817,6 +831,10 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: spacing(3),
   },
+  accountSection: {
+    marginBottom: spacing(3),
+    marginTop: spacing(3),
+  },
   sectionTitle: {
     color: colors.text,
     fontSize: 20,
@@ -892,6 +910,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: spacing(1),
   },
   settingInfo: {
     flexDirection: 'row-reverse',
@@ -907,6 +926,13 @@ const styles = StyleSheet.create({
   },
   rtlSwitchContainer: {
     flexDirection: 'row-reverse',
+  },
+  settingHelp: {
+    color: colors.text,
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: spacing(1),
+    lineHeight: 18,
   },
 
   // Filter Cards - Tinder Inspired
@@ -1016,9 +1042,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     transform: [{ scaleX: -1 }],
   },
-  rtlSwitchContainer: {
-    transform: [{ scaleX: -1 }],
-  },
   distanceLabels: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
@@ -1096,48 +1119,50 @@ const styles = StyleSheet.create({
     top: -4,
     right: -4,
     backgroundColor: colors.card,
-    borderRadius: radii.full,
+    borderRadius: 12,
   },
 
   // Account Actions
   logoutCard: {
     backgroundColor: colors.card,
     borderRadius: radii.lg,
-    padding: spacing(2),
+    padding: spacing(2.5),
     marginBottom: spacing(1.5),
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#f59e0b',
+    alignSelf: 'center',
+    width: '70%',
     ...shadows.soft,
   },
   logoutText: {
     color: '#f59e0b',
     fontSize: 16,
     fontWeight: '700',
-    flex: 1,
-    marginRight: spacing(1.5),
-    textAlign: 'right',
+    textAlign: 'center',
+    marginHorizontal: spacing(1),
   },
   deleteCard: {
     backgroundColor: colors.card,
     borderRadius: radii.lg,
-    padding: spacing(2),
+    padding: spacing(2.5),
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#ef4444',
+    alignSelf: 'center',
+    width: '70%',
     ...shadows.card,
   },
   deleteText: {
     color: '#ef4444',
     fontSize: 16,
     fontWeight: '700',
-    flex: 1,
-    marginRight: spacing(1.5),
-    textAlign: 'right',
+    textAlign: 'center',
+    marginHorizontal: spacing(1),
   },
 
   // Delete Modal
