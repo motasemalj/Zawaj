@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  role               String    // 'male' | 'female' | 'mother'
+  mother_for         String?   // 'son' | 'daughter' | null
+  phone              String?   @unique
+  email              String?   @unique
+  display_name       String
+  first_name         String?   // User's first name
+  dob                DateTime
+  gender             String?
+  city               String?
+  country            String?
+  nationality        String?
+  ethnicity          String?   // User's ethnicity
+  height_cm          Int?
+  education          String?
+  profession         String?
+  income_range       String?
+  languages          String?   // JSON string array
+  marital_status     String?
+  relocate           Boolean?  @default(false)
+  want_children      String?   // yes/no/maybe
+  children_preference String?  // 'want_children' | 'have_and_want_more' | 'have_dont_want_more' | 'dont_want'
+  religiousness      Int?      // 1..5
+  prayer_freq        String?   // 'always' | 'often' | 'sometimes' | 'rarely'
+  sect               String?   // 'sunni' | 'shia' | 'other'
+  marriage_timeline  String?   // 'within_6_months' | '6_12_months' | '1_2_years' | '2plus_years' | 'open'
+  quran_engagement   String?
+  fasting_ramadan    String?
+  hijab_preference   String?
+  beard              String?
+  hijab              String?
+  halal_diet         String?
+  smoker             String?
+  fitness_level      String?
+  dietary_preferences String?
+  spouse_practice    String?
+  interests          String?   // JSON string array (up to 10)
+  personality_traits String?   // JSON string array (up to 5)
+  icebreaker_questions String? // JSON array of {prompt, answer, type: 'text'|'voice'}
+  bio                String?
+  muslim_affirmed    Boolean   @default(false)
+  phone_verified     Boolean   @default(false)
+  email_verified     Boolean   @default(false)
+  selfie_verified    Boolean   @default(false)
+  selfie_url         String?   // Selfie verification photo (not shown publicly)
+  terms_accepted     Boolean   @default(false)
+  terms_accepted_at  DateTime?
+  onboarding_completed Boolean @default(false)
+  onboarding_step    Int?      @default(0) // Track which step user is on
+  location           String?   // JSON string {lat,lng}
+  discovery_radius_km Int?
+  privacy_blur_mode  Boolean   @default(false)
+  privacy_reveal_on_match Boolean @default(true)
+  photos_blurred     Boolean   @default(false) // Toggle to blur all photos
+  discoverable       Boolean   @default(true)
+  expo_push_token    String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  last_active_at     DateTime? 
+
+  // For mothers representing a ward (son/daughter)
+  ward_display_name   String?
+  ward_dob            DateTime?
+  ward_city           String?
+  ward_country        String?
+  ward_education      String?
+  ward_profession     String?
+  ward_bio            String?
+
+  photos             Photo[]
+  preferences        Preference?
+  swipes_from        Swipe[]   @relation("swipes_from")
+  swipes_to          Swipe[]   @relation("swipes_to")
+  matches_a          Match[]   @relation("matches_a")
+  matches_b          Match[]   @relation("matches_b")
+  messages           Message[]
+  reports            Report[]  @relation("reports")
+  blocks_given       Block[]   @relation("blocks_given")
+  blocks_received    Block[]   @relation("blocks_received")
+  audit_logs         AuditLog[] @relation("audit_sender")
+}
+
+model Photo {
+  id        String  @id @default(cuid())
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  url       String
+  ordering  Int
+  blurred   Boolean @default(false)
+}
+
+model Preference {
+  id                        String   @id @default(cuid())
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                    String   @unique
+  age_min                   Int?
+  age_max                   Int?
+  distance_km               Int?
+  height_min_cm             Int?
+  height_max_cm             Int?
+  countries                 String?  // JSON string array
+  cities                    String?  // JSON string array
+  education_preferences     String?  // JSON string array
+  profession                String?  // JSON string array
+  languages                 String?  // JSON string array
+  religiousness_min         Int?
+  prayer_freq               String?  // JSON string array
+  marital_status_preferences String?  // JSON string array
+  sect_preferences          String?  // JSON string array
+  smoking_preferences       String?  // JSON string array
+  children_preferences      String?  // JSON string array
+  origin_preferences        String?  // JSON string array (ethnicity/countries)
+  relocate_preference       Boolean? // null = any, true = must relocate, false = must not relocate
+  want_children             String?  // JSON string array
+  height_min                Int?     // Deprecated - use height_min_cm
+  height_max                Int?     // Deprecated - use height_max_cm
+  relocate                  String?  // Deprecated - use relocate_preference
+  education                 String?  // Deprecated - use education_preferences
+  marital_status            String?  // Deprecated - use marital_status_preferences
+  show_only_mothers         Boolean? @default(false)
+}
+
+model Swipe {
+  id            String   @id @default(cuid())
+  from_user     User     @relation("swipes_from", fields: [from_user_id], references: [id], onDelete: Cascade)
+  from_user_id  String
+  to_user       User     @relation("swipes_to", fields: [to_user_id], references: [id], onDelete: Cascade)
+  to_user_id    String
+  direction     String   // 'left' | 'right'
+  is_super_like Boolean  @default(false)
+  created_at    DateTime @default(now())
+
+  @@index([from_user_id, to_user_id])
+}
+
+model Match {
+  id               String   @id @default(cuid())
+  user_a           User     @relation("matches_a", fields: [user_a_id], references: [id], onDelete: Cascade)
+  user_a_id        String
+  user_b           User     @relation("matches_b", fields: [user_b_id], references: [id], onDelete: Cascade)
+  user_b_id        String
+  created_at       DateTime @default(now())
+  last_message_at  DateTime?
+  roles_snapshot   String?  // JSON string
+  messages         Message[]
+  audit_logs       AuditLog[]
+
+  @@unique([user_a_id, user_b_id])
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  match      Match    @relation(fields: [match_id], references: [id], onDelete: Cascade)
+  match_id   String
+  sender     User     @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+  sender_id  String
+  text       String
+  created_at DateTime @default(now())
+  read_at    DateTime?
+  flagged    Boolean  @default(false)
+}
+
+model Report {
+  id           String   @id @default(cuid())
+  reporter     User     @relation("reports", fields: [reporter_id], references: [id], onDelete: Cascade)
+  reporter_id  String
+  target_type  String   // 'user' | 'message' | 'photo'
+  target_id    String
+  reason       String
+  created_at   DateTime @default(now())
+  status       String   @default("open")
+}
+
+model Block {
+  id          String  @id @default(cuid())
+  blocker     User    @relation("blocks_given", fields: [blocker_id], references: [id], onDelete: Cascade)
+  blocker_id  String
+  blocked     User    @relation("blocks_received", fields: [blocked_id], references: [id], onDelete: Cascade)
+  blocked_id  String
+  created_at  DateTime @default(now())
+
+  @@unique([blocker_id, blocked_id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  match      Match    @relation(fields: [match_id], references: [id], onDelete: Cascade)
+  match_id   String
+  sender     User     @relation("audit_sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  sender_id  String
+  action     String
+  created_at DateTime @default(now())
+}
+
+model OtpCode {
+  id         String   @id @default(cuid())
+  phone      String
+  code       String
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@index([phone])
+}
+
+model EmailOtp {
+  id         String   @id @default(cuid())
+  email      String
+  code       String
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@index([email])
+}
+
