@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TouchableOpacity, ViewStyle, TextStyle, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, gradients, radii, spacing } from '../../theme';
+import { feedback } from '../../utils/haptics';
 
 type ButtonProps = {
   title: string;
@@ -15,11 +16,19 @@ type ButtonProps = {
 
 export default function Button({ title, onPress, loading, disabled, variant = 'gradient', style, textStyle }: ButtonProps) {
   const isDisabled = disabled || loading;
+  
+  const handlePress = () => {
+    if (!isDisabled && onPress) {
+      feedback.buttonPress();
+      onPress();
+    }
+  };
+  
   if (variant === 'gradient') {
     return (
       <TouchableOpacity
         disabled={isDisabled}
-        onPress={onPress}
+        onPress={handlePress}
         style={[{ borderRadius: radii.lg, overflow: 'hidden', opacity: isDisabled ? 0.6 : 1 }, style]}
         activeOpacity={0.8}
       >
@@ -37,7 +46,7 @@ export default function Button({ title, onPress, loading, disabled, variant = 'g
 
   if (variant === 'outline') {
     return (
-      <TouchableOpacity disabled={isDisabled} onPress={onPress} style={[{ paddingVertical: spacing(1.25), paddingHorizontal: spacing(3), alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.lg }, style]}>
+      <TouchableOpacity disabled={isDisabled} onPress={handlePress} style={[{ paddingVertical: spacing(1.25), paddingHorizontal: spacing(3), alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.lg }, style]}>
         {loading ? <ActivityIndicator color={colors.text} /> : <Text style={[{ color: colors.text, fontWeight: '700' }, textStyle]}>{title}</Text>}
       </TouchableOpacity>
     );
@@ -45,14 +54,14 @@ export default function Button({ title, onPress, loading, disabled, variant = 'g
 
   if (variant === 'ghost') {
     return (
-      <TouchableOpacity disabled={isDisabled} onPress={onPress} style={[{ paddingVertical: spacing(1), paddingHorizontal: spacing(2), alignItems: 'center' }, style]}>
+      <TouchableOpacity disabled={isDisabled} onPress={handlePress} style={[{ paddingVertical: spacing(1), paddingHorizontal: spacing(2), alignItems: 'center' }, style]}>
         {loading ? <ActivityIndicator color={colors.text} /> : <Text style={[{ color: colors.text }, textStyle]}>{title}</Text>}
       </TouchableOpacity>
     );
   }
 
   return (
-    <TouchableOpacity disabled={isDisabled} onPress={onPress} style={[{ paddingVertical: spacing(1.5), paddingHorizontal: spacing(3), alignItems: 'center', backgroundColor: colors.accent, borderRadius: radii.lg }, style]}>
+    <TouchableOpacity disabled={isDisabled} onPress={handlePress} style={[{ paddingVertical: spacing(1.5), paddingHorizontal: spacing(3), alignItems: 'center', backgroundColor: colors.accent, borderRadius: radii.lg }, style]}>
       {loading ? <ActivityIndicator color="#000" /> : <Text style={[{ color: '#000', fontWeight: '700' }, textStyle]}>{title}</Text>}
     </TouchableOpacity>
   );

@@ -12,7 +12,9 @@ import GradientBackground from '../components/ui/GradientBackground';
 import Avatar from '../components/ui/Avatar';
 import MatchModal from '../components/MatchModal';
 import ProfileDetailModal from '../components/ProfileDetailModal';
+import SearchFiltersModal from '../components/SearchFiltersModal';
 import { feedback } from '../utils/haptics';
+import { useDiscoveryProfiles, useSwipe, useUndoSwipe, useMarkDiscoverySeen } from '../api/hooks';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SWIPE_THRESHOLD = 120;
@@ -24,10 +26,23 @@ export default function EnhancedDiscoveryScreen() {
   const currentUserId = useApiState((state) => state.currentUserId);
   const queryClient = useQueryClient();
   
-  // State
-  const [profiles, setProfiles] = useState<(User & { is_super_liker?: boolean })[]>([]);
+  // React Query for discovery data
+  const {
+    data: discoveryProfiles,
+    isLoading: discoveryLoading,
+    error: discoveryError,
+    refetch: refetchDiscovery,
+    markAsShown,
+    clearSessionExcludes,
+    setPage,
+  } = useDiscoveryProfiles();
+  
+  const swipeMutation = useSwipe();
+  const undoSwipeMutation = useUndoSwipe();
+  const markSeenMutation = useMarkDiscoverySeen();
+  
+  // Local state for UI and animations (decoupled from data fetching)
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsLocation, setNeedsLocation] = useState(false);
   const [locBusy, setLocBusy] = useState(false);
@@ -45,134 +60,71 @@ export default function EnhancedDiscoveryScreen() {
   const [isNextImageLoading, setIsNextImageLoading] = useState(false);
   const [lastSwipedProfile, setLastSwipedProfile] = useState<(User & { is_super_liker?: boolean }) | null>(null);
   const [canUndo, setCanUndo] = useState(false);
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
   
-  // Track ALL profile IDs shown in this session to prevent duplicates
-  const shownProfileIdsRef = useRef<Set<string>>(new Set());
+  // Local append-only deck to prevent flicker when query refetches
+  type DiscoveryUser = User & { is_super_liker?: boolean };
+  const [deck, setDeck] = useState<DiscoveryUser[]>([]);
+  
+  // Merge new discovery results into deck (append missing, dedupe by id, cap size)
+  useEffect(() => {
+    const incoming = discoveryProfiles || [];
+    if (!incoming || incoming.length === 0) return;
+    setDeck((prev) => {
+      const existingIds = new Set(prev.map((p: DiscoveryUser) => p.id));
+      const additions = (incoming as DiscoveryUser[]).filter((p: DiscoveryUser) => !existingIds.has(p.id));
+      if (additions.length === 0) return prev; // no changes
+      const merged = prev.concat(additions);
+      // Cap deck to last 100 profiles to avoid unbounded growth
+      return merged.slice(-100);
+    });
+  }, [discoveryProfiles]);
+  
+  // Loading only blocks when deck is empty
+  const loading = discoveryLoading && deck.length === 0;
+  
+  // Mark current profile as shown
+  const currentProfile = deck[currentIndex] || null;
+  const seenMarkedRef = useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (currentProfile) {
+      // Mark in-session to avoid local duplicates (idempotent)
+      markAsShown(currentProfile.id);
+      // Mark server-side only once per id to avoid duplicate calls
+      if (!seenMarkedRef.current.has(currentProfile.id)) {
+        seenMarkedRef.current.add(currentProfile.id);
+        markSeenMutation.mutate(currentProfile.id);
+      }
+    }
+  }, [currentProfile?.id, markAsShown, markSeenMutation]);
+  
+  // Handle discovery errors
+  React.useEffect(() => {
+    if (discoveryError) {
+      const err = discoveryError as any;
+      if (err?.response?.status === 403 && err?.response?.data?.message?.includes('Location required')) {
+        setNeedsLocation(true);
+      } else if (err?.response?.status === 401 || err?.response?.status === 403) {
+        setError('خطأ في المصادقة - يرجى تسجيل الدخول مرة أخرى');
+      } else {
+        setError(err?.response?.data?.message || 'فشل تحميل الملفات الشخصية');
+      }
+    }
+  }, [discoveryError]);
   
   // Animation refs
   const position = useRef(new Animated.ValueXY()).current;
   const isSwipingRef = useRef(false);
   const cardOpacity = useRef(new Animated.Value(1)).current;
 
-  // Prevent overlapping discovery requests and schedule fetches to avoid spamming
-  const discoveryInFlightRef = useRef(false);
-  const lastDiscoveryTsRef = useRef(0);
-  const scheduledDiscoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduledAppendRef = useRef<boolean | null>(null);
-  const MIN_DISCOVERY_INTERVAL_MS = 10000; // 10s minimum gap between requests
-
-  // Load profiles (actual network call)
-  const loadProfiles = useCallback(async (append = false) => {
-    try {
-      setError(null);
-      
-      // Check if user is authenticated
-      if (!currentUserId) {
-        console.error('No current user ID - cannot load profiles');
-        setError('يرجى تسجيل الدخول أولاً');
-        setLoading(false);
-        return;
-      }
-      
-      // Send list of already shown profile IDs to backend to exclude them
-      const excludeIds = Array.from(shownProfileIdsRef.current);
-      console.log(`Loading profiles (append=${append}), excluding ${excludeIds.length} already-shown profiles`);
-      
-      if (discoveryInFlightRef.current) {
-        console.log('Discovery request already in flight, skipping');
-        return;
-      }
-      discoveryInFlightRef.current = true;
-
-      const res = await api.get('/discovery', {
-        params: {
-          exclude_ids: excludeIds.join(','),
-          _ts: Date.now(), // defeat any intermediate caches
-        }
-      });
-      const newProfiles = res.data.users || [];
-      console.log('Loaded profiles from API:', newProfiles.length);
-      
-      // Filter out any profiles we've already shown (double safety check)
-      const freshProfiles = newProfiles.filter((p: any) => !shownProfileIdsRef.current.has(p.id));
-      console.log(`Fresh profiles after client-side filtering: ${freshProfiles.length}`);
-      
-      // Add all new profile IDs to our tracking set
-      freshProfiles.forEach((p: any) => shownProfileIdsRef.current.add(p.id));
-      
-      if (append) {
-        // Append new profiles to existing ones
-        setProfiles(prev => {
-          const combined = [...prev, ...freshProfiles];
-          console.log(`Total profiles after append: ${combined.length}`);
-          return combined;
-        });
-      } else {
-        // Replace profiles (initial load)
-        setProfiles(freshProfiles);
-        setCurrentIndex(0);
-        console.log(`Set ${freshProfiles.length} profiles for initial load`);
-      }
-      setLastRefreshTime(new Date());
-      setLoading(false);
-    } catch (err: any) {
-      // Suppress noise if user logged out mid-request
-      if (!useApiState.getState().currentUserId) {
-        setLoading(false);
-        discoveryInFlightRef.current = false;
-        return;
-      }
-      console.error('Failed to load profiles:', err);
-      // Check if it's a location required error
-      if (err.response?.status === 403 && err.response?.data?.message?.includes('Location required')) {
-        setNeedsLocation(true);
-        setLoading(false);
-        return;
-      }
-      // Check if it's an authentication error
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        setError('خطأ في المصادقة - يرجى تسجيل الدخول مرة أخرى');
-      } else {
-        setError(err.response?.data?.message || 'فشل تحميل الملفات الشخصية');
-      }
-      if (!append) {
-        setProfiles([]);
-      }
-      setLoading(false);
+  // Refetch discovery when running low on profiles (based on deck)
+  React.useEffect(() => {
+    if (deck.length > 0 && currentIndex >= deck.length - 3) {
+      console.log('Running low on profiles, refetching...');
+      // Move to next page fetch
+      setPage((p: number) => p + 1);
     }
-    finally {
-      discoveryInFlightRef.current = false;
-      lastDiscoveryTsRef.current = Date.now();
-    }
-  }, [api, currentUserId]);
-
-  // Schedule discovery request with cooldown and batching
-  const scheduleDiscovery = useCallback((preferAppend: boolean, reason?: string) => {
-    // If logged out, do nothing
-    if (!useApiState.getState().currentUserId) {
-      return;
-    }
-    // Merge preference (any append wins)
-    if (scheduledAppendRef.current === null) {
-      scheduledAppendRef.current = preferAppend;
-    } else {
-      scheduledAppendRef.current = scheduledAppendRef.current || preferAppend;
-    }
-
-    // If a run is already scheduled, let it fire
-    if (scheduledDiscoveryTimerRef.current) {
-      return;
-    }
-
-    const elapsed = Date.now() - lastDiscoveryTsRef.current;
-    const delay = elapsed >= MIN_DISCOVERY_INTERVAL_MS ? 0 : (MIN_DISCOVERY_INTERVAL_MS - elapsed);
-    scheduledDiscoveryTimerRef.current = setTimeout(async () => {
-      scheduledDiscoveryTimerRef.current = null;
-      const append = !!scheduledAppendRef.current;
-      scheduledAppendRef.current = null;
-      await loadProfiles(append);
-    }, delay);
-  }, [loadProfiles]);
+  }, [currentIndex, deck.length, setPage]);
 
   useEffect(() => {
     (async () => {
@@ -194,7 +146,6 @@ export default function EnhancedDiscoveryScreen() {
           if (!locPerm.granted) {
             console.log('Location permission not granted, showing location required screen');
             setNeedsLocation(true);
-            setLoading(false);
             return; // Don't load profiles without location
           } else {
             setNeedsLocation(false);
@@ -202,7 +153,6 @@ export default function EnhancedDiscoveryScreen() {
         } catch (e) {
           console.error('Error checking location permission:', e);
           setNeedsLocation(true);
-          setLoading(false);
           return;
         }
 
@@ -235,13 +185,13 @@ export default function EnhancedDiscoveryScreen() {
         } catch {}
         
       } catch {}
-      if (useApiState.getState().currentUserId) {
-        await loadProfiles();
-      }
     })();
-    // Only run once
+    // Only run once - React Query handles data fetching automatically
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // When filters change, the mutation in SearchFiltersModal automatically
+  // invalidates the discovery query, so React Query will refetch automatically
 
   // Track app state changes
   useEffect(() => {
@@ -272,9 +222,9 @@ export default function EnhancedDiscoveryScreen() {
               } catch {}
             } catch {}
             if (needsLocation) {
-              console.log('Location permission enabled, loading profiles...');
+              console.log('Location permission enabled, refetching profiles...');
               setNeedsLocation(false);
-              loadProfiles(false);
+              refetchDiscovery();
               return;
             }
           } else {
@@ -294,16 +244,16 @@ export default function EnhancedDiscoveryScreen() {
         } catch {}
         
         // If we have no profiles and location is enabled, refresh immediately
-        if (profiles.length === 0 && !needsLocation && useApiState.getState().currentUserId) {
+        if (deck.length === 0 && !needsLocation && useApiState.getState().currentUserId) {
           console.log('App became active with no profiles, refreshing...');
-          loadProfiles(false);
+          refetchDiscovery();
         }
       }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [appState, profiles.length, needsLocation, loadProfiles]);
+  }, [appState, deck.length, needsLocation, refetchDiscovery]);
 
   async function requestAndSaveLocation() {
     try {
@@ -390,8 +340,7 @@ export default function EnhancedDiscoveryScreen() {
       
       setNeedsLocation(false);
       setError(null);
-      setLoading(true);
-      await loadProfiles();
+      refetchDiscovery();
     } catch (e) {
       console.error('Error requesting location:', e);
       setError('فشل الحصول على الموقع');
@@ -413,8 +362,7 @@ export default function EnhancedDiscoveryScreen() {
 
   // Prefetch next profile's first image to avoid blank state after swipe
   useEffect(() => {
-    // nextProfile is declared later; guard with profiles/currentIndex
-    const np = profiles[currentIndex + 1];
+    const np = deck[currentIndex + 1];
     if (np?.photos && np.photos[0]?.url) {
       const uri = `${api.defaults.baseURL}${np.photos[0].url}`;
       setIsNextImageLoading(true);
@@ -424,7 +372,7 @@ export default function EnhancedDiscoveryScreen() {
     } else {
       setIsNextImageLoading(false);
     }
-  }, [profiles, currentIndex]);
+  }, [deck, currentIndex]);
 
   const nextPhoto = () => {
     if (!currentProfile?.photos || currentProfile.photos.length <= 1) return;
@@ -467,48 +415,23 @@ export default function EnhancedDiscoveryScreen() {
     setNeedsNotifications(false);
   }
 
-  // Store profiles and currentIndex in refs for access in callbacks
-  const profilesRef = useRef(profiles);
-  const currentIndexRef = useRef(currentIndex);
-  
-  useEffect(() => {
-    profilesRef.current = profiles;
-    currentIndexRef.current = currentIndex;
-  }, [profiles, currentIndex]);
-
-  // Auto-reload profiles when running low (when 5 profiles left or at the end)
-  useEffect(() => {
-    if (profiles.length > 0 && currentIndex >= profiles.length - 5 && !loading) {
-      console.log('Running low on profiles, scheduling more...');
-      scheduleDiscovery(true, 'low-buffer');
-    }
-  }, [currentIndex, profiles.length, loading, scheduleDiscovery]);
-
-  // Early prefetch after first swipe to minimize gaps
-  useEffect(() => {
-    if (currentIndex === 1 && profiles.length < 10 && !loading) {
-      console.log('Prefetching additional profiles early after first swipe (scheduled)...');
-      scheduleDiscovery(true, 'first-swipe');
-    }
-  }, [currentIndex, profiles.length, loading, scheduleDiscovery]);
-
-  // Periodic refresh for new profiles using scheduler + cooldown
+  // Periodic refresh for new profiles using background refetching
   useEffect(() => {
     const getRefreshInterval = () => {
-      if (profiles.length === 0) return 45000; // 45s
-      if (profiles.length <= 3) return 30000; // 30s
-      if (profiles.length <= 10) return 90000; // 90s
+      if (deck.length === 0) return 45000; // 45s
+      if (deck.length <= 3) return 30000; // 30s
+      if (deck.length <= 10) return 90000; // 90s
       return 180000; // 3m
     };
 
     const interval = setInterval(() => {
       if (appState !== 'active') return;
-      // Prefer append if we have some profiles; replace if none
-      scheduleDiscovery(profiles.length > 0, 'periodic');
+      console.log('Periodic refresh - refetching profiles...');
+      refetchDiscovery();
     }, getRefreshInterval());
 
     return () => clearInterval(interval);
-  }, [profiles.length, appState, scheduleDiscovery]);
+  }, [deck.length, appState, refetchDiscovery]);
 
   // Handle swipe action
   const handleSwipe = useCallback((direction: 'left' | 'right' | 'up', isSuperLike = false) => {
@@ -518,19 +441,16 @@ export default function EnhancedDiscoveryScreen() {
       return;
     }
     
-    const currentIdx = currentIndexRef.current;
-    const currentProfiles = profilesRef.current;
-    
-    if (currentIdx >= currentProfiles.length) {
+    if (currentIndex >= deck.length) {
       console.log('No more profiles');
       return;
     }
 
-    const profile = currentProfiles[currentIdx];
+    const profile = deck[currentIndex];
     console.log(`=== SWIPE START ===`);
     console.log('Direction:', direction);
     console.log('Profile:', profile.id, profile.display_name);
-    console.log('Current Index:', currentIdx);
+    console.log('Current Index:', currentIndex);
     console.log('Super Like:', isSuperLike);
     
     // Lock swiping
@@ -543,40 +463,67 @@ export default function EnhancedDiscoveryScreen() {
     setLastSwipedProfile(profile);
     setCanUndo(true);
 
-    // Send to backend immediately
+    // Send to backend using React Query mutation
     const actualDirection = direction === 'up' ? 'right' : direction;
-    api.post('/swipes', {
+    swipeMutation.mutate({
       to_user_id: profile.id,
       direction: actualDirection,
       is_super_like: isSuperLike,
-    }).then((res) => {
-      console.log('✅ Backend updated');
-      // Check if it's a match!
-      if (res.data.match) {
-        console.log('🎉 IT\'S A MATCH!', res.data.match);
+    }, {
+      onSuccess: (data) => {
+        console.log('✅ Backend updated');
+        // Check if it's a match!
+        if (data.match) {
+          console.log('🎉 IT\'S A MATCH!', data.match);
+          
+          // Invalidate matches query immediately to update the list
+          queryClient.invalidateQueries({ queryKey: ['matches'] });
+          console.log('✅ Matches cache invalidated');
+          
+          setMatchedUser(profile);
+          setMatchId(data.match.id);
+          
+          // Add match celebration feedback
+          feedback.match();
+          
+          // Show modal almost instantly for maximum excitement!
+          setTimeout(() => {
+            setShowMatchModal(true);
+          }, 100);
+        }
+      },
+      onError: (err: any) => {
+        const status = err?.response?.status;
+        const data = err?.response?.data;
         
-        // IMMEDIATELY invalidate matches query to update the list
-        queryClient.invalidateQueries({ queryKey: ['matches'] });
-        console.log('✅ Matches cache invalidated - list will update instantly');
-        
-        setMatchedUser(profile);
-        setMatchId(res.data.match.id);
-        
-        // Add match celebration feedback
-        feedback.match();
-        
-        // Show modal almost instantly for maximum excitement!
-        setTimeout(() => {
-          setShowMatchModal(true);
-        }, 100);
+        // Handle different error types gracefully
+        if (status === 401 || status === 403) {
+          // Authentication error - log user out
+          console.error('❌ Authentication error during swipe - logging out');
+          Alert.alert(
+            'انتهت الجلسة',
+            'يرجى تسجيل الدخول مرة أخرى',
+            [
+              {
+                text: 'حسناً',
+                onPress: () => {
+                  useApiState.getState().setCurrentUserId(null);
+                }
+              }
+            ]
+          );
+          return; // Don't continue animation
+        } else if (status === 422 && data?.error?.includes('Not eligible')) {
+          // User not eligible - this shouldn't happen if backend filters correctly
+          // Silently skip to next profile without showing error
+          console.warn('⚠️ User not eligible (backend should have filtered this):', profile.id);
+          // Don't show error to user, just continue to next profile
+        } else {
+          // Other errors - log but don't show to user unless critical
+          console.error('❌ Swipe failed:', data?.error || err.message);
+          // Most swipe errors are recoverable, so don't block the UI
+        }
       }
-    }).catch(err => {
-      console.error('❌ Backend failed:', err.response?.data || err.message);
-      // If it's an auth error, show a more helpful message
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        console.error('Authentication error during swipe - user may need to re-login');
-      }
-      // Don't block the UI, just log the error
     });
 
     // Calculate animation target
@@ -604,17 +551,7 @@ export default function EnhancedDiscoveryScreen() {
       position.setValue({ x: 0, y: 0 });
       cardOpacity.setValue(1);
       isSwipingRef.current = false;
-      setCurrentIndex(prev => {
-        const nextIndex = prev + 1;
-        const total = profilesRef.current.length;
-        const remaining = total - nextIndex;
-        // Proactively fetch when buffer is low (scheduled)
-        if (!loading && remaining <= 5) {
-          console.log('Low buffer after swipe, scheduling fetch...');
-          scheduleDiscovery(true, 'post-swipe');
-        }
-        return nextIndex;
-      });
+      setCurrentIndex(prev => prev + 1);
       console.log('=== SWIPE END ===\n');
     };
 
@@ -643,7 +580,7 @@ export default function EnhancedDiscoveryScreen() {
       console.log('Animation complete (ensuring completion)');
       complete();
     });
-  }, [position, api, cardOpacity, scheduleDiscovery, loading]);
+  }, [position, cardOpacity, currentIndex, deck, swipeMutation]);
 
   // Handle undo last swipe (limited to 1 undo - user must swipe again to enable another undo)
   const handleUndo = useCallback(async () => {
@@ -652,41 +589,33 @@ export default function EnhancedDiscoveryScreen() {
       return;
     }
 
-    try {
-      console.log('🔙 UNDOING SWIPE for profile:', lastSwipedProfile.id);
-      
-      // Add haptic feedback for undo
-      feedback.buttonPress();
-      
-      // Call backend to undo
-      const res = await api.post('/swipes/undo');
-      
-      if (res.data.undone) {
-        console.log('✅ Swipe undone on backend');
-        
-        // If a match was deleted, invalidate matches cache
-        if (res.data.match_deleted) {
-          queryClient.invalidateQueries({ queryKey: ['matches'] });
-          console.log('✅ Match deleted - matches cache invalidated');
+    console.log('🔙 UNDOING SWIPE for profile:', lastSwipedProfile.id);
+    
+    // Add haptic feedback for undo
+    feedback.buttonPress();
+    
+    // Call backend to undo using React Query mutation
+    undoSwipeMutation.mutate(undefined, {
+      onSuccess: (data) => {
+        if (data.undone) {
+          console.log('✅ Swipe undone on backend');
+          
+          // Go back one index
+          setCurrentIndex(prev => Math.max(0, prev - 1));
+          
+          // IMPORTANT: Disable undo until next swipe (limit: 1 undo per swipe)
+          setCanUndo(false);
+          setLastSwipedProfile(null);
+          
+          console.log('✅ Undo complete - previous card restored (undo now disabled until next swipe)');
         }
-        
-        // Go back one index
-        setCurrentIndex(prev => Math.max(0, prev - 1));
-        
-        // Remove from shown set so it can appear again
-        shownProfileIdsRef.current.delete(lastSwipedProfile.id);
-        
-        // IMPORTANT: Disable undo until next swipe (limit: 1 undo per swipe)
-        setCanUndo(false);
-        setLastSwipedProfile(null);
-        
-        console.log('✅ Undo complete - previous card restored (undo now disabled until next swipe)');
+      },
+      onError: (err: any) => {
+        console.error('❌ Undo failed:', err.response?.data || err.message);
+        Alert.alert('خطأ', 'لم نتمكن من التراجع عن الإجراء');
       }
-    } catch (err: any) {
-      console.error('❌ Undo failed:', err.response?.data || err.message);
-      Alert.alert('خطأ', 'لم نتمكن من التراجع عن الإجراء');
-    }
-  }, [canUndo, lastSwipedProfile, api, queryClient]);
+    });
+  }, [canUndo, lastSwipedProfile, undoSwipeMutation]);
 
   // Store handleSwipe in ref to avoid closure issues
   const handleSwipeRef = useRef(handleSwipe);
@@ -763,9 +692,8 @@ export default function EnhancedDiscoveryScreen() {
     })
   ).current;
 
-  // Get current and next profiles
-  const currentProfile = profiles[currentIndex];
-  const nextProfile = profiles[currentIndex + 1];
+  // Get next profile (currentProfile already defined above)
+  const nextProfile = deck[currentIndex + 1];
 
   // Rotation interpolation
   const rotate = position.x.interpolate({
@@ -797,7 +725,7 @@ export default function EnhancedDiscoveryScreen() {
   if (loading) {
     return (
       <GradientBackground>
-        <SafeAreaView style={styles.wrapper} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={styles.wrapper} edges={['top', 'left', 'right']}>
           <View style={styles.container}>
             <Text style={styles.loadingText}>جاري تحميل الملفات الشخصية...</Text>
           </View>
@@ -878,7 +806,10 @@ export default function EnhancedDiscoveryScreen() {
                   ? "تعذر تحميل الملفات الشخصية. يرجى المحاولة لاحقاً" 
                   : "لقد شاهدت جميع الملفات الشخصية المتاحة"}
               </Text>
-              <TouchableOpacity onPress={() => loadProfiles(false)} style={styles.refreshBtn}>
+              <TouchableOpacity onPress={() => {
+                feedback.buttonPress();
+                refetchDiscovery();
+              }} style={styles.refreshBtn}>
                 <Ionicons name="refresh" size={20} color="#fff" />
                 <Text style={styles.refreshBtnText}>تحديث</Text>
               </TouchableOpacity>
@@ -906,8 +837,17 @@ export default function EnhancedDiscoveryScreen() {
   return (
     <GradientBackground>
       <SafeAreaView style={styles.wrapper} edges={['top', 'left', 'right']}>
-        <View style={styles.container}>
-          <Text style={styles.header}>استكشاف</Text>
+          <View style={styles.container}>
+           <View style={styles.headerRow}>
+             <Text style={styles.header}>استكشاف</Text>
+             <TouchableOpacity 
+               style={styles.filterButton}
+               onPress={() => { feedback.buttonPress(); setShowFiltersModal(true); }}
+               activeOpacity={0.85}
+             >
+               <Ionicons name="funnel" size={22} color={colors.accent} />
+             </TouchableOpacity>
+           </View>
 
           {/* Notification Permission Prompt (non-blocking) */}
           {needsNotifications && (
@@ -920,10 +860,16 @@ export default function EnhancedDiscoveryScreen() {
                 </View>
               </View>
               <View style={styles.notificationActions}>
-                <TouchableOpacity onPress={requestNotifications} style={styles.notificationEnableBtn} disabled={notifBusy}>
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  requestNotifications();
+                }} style={styles.notificationEnableBtn} disabled={notifBusy}>
                   <Text style={styles.notificationEnableText}>{notifBusy ? 'جارٍ...' : 'تفعيل'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={dismissNotificationPrompt} style={styles.notificationDismissBtn}>
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  dismissNotificationPrompt();
+                }} style={styles.notificationDismissBtn}>
                   <Text style={styles.notificationDismissText}>لاحقاً</Text>
                 </TouchableOpacity>
               </View>
@@ -995,7 +941,10 @@ export default function EnhancedDiscoveryScreen() {
               {/* Card Image with Photo Navigation */}
               {currentProfile.photos && currentProfile.photos.length > 0 ? (
                 <View>
-                  <TouchableOpacity activeOpacity={0.9} onPress={() => setShowProfileDetail(true)}>
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => {
+                    feedback.buttonPress();
+                    setShowProfileDetail(true);
+                  }}>
                     <ImageBackground
                       source={{ uri: `${api.defaults.baseURL}${currentProfile.photos[currentPhotoIndex]?.url}` }}
                       style={styles.cardImage}
@@ -1025,7 +974,7 @@ export default function EnhancedDiscoveryScreen() {
 
                         {/* Photo indicators */}
                         <View style={styles.photoIndicators}>
-                          {currentProfile.photos.map((_, idx) => (
+                          {currentProfile.photos.map((_: any, idx: number) => (
                             <View
                               key={idx}
                               style={[styles.photoDot, idx === currentPhotoIndex && styles.photoDotActive]}
@@ -1208,11 +1157,11 @@ export default function EnhancedDiscoveryScreen() {
             setShowMatchModal(false);
             setMatchedUser(null);
             setMatchId(null);
-            // If that was the last profile, auto-reload for better UX
-            if (currentIndex >= profiles.length) {
-              console.log('Last profile was a match, auto-reloading profiles for smooth experience...');
+          // If that was the last profile, auto-reload for better UX
+          if (currentIndex >= deck.length) {
+              console.log('Last profile was a match, refetching profiles for smooth experience...');
               setTimeout(() => {
-                loadProfiles(true); // Append mode
+                refetchDiscovery();
               }, 300); // Small delay for smooth transition
             }
           }}
@@ -1243,6 +1192,19 @@ export default function EnhancedDiscoveryScreen() {
             setTimeout(() => handleSwipe('up', true), 100);
           }}
         />
+        <SearchFiltersModal 
+          visible={showFiltersModal} 
+          onClose={() => {
+            setShowFiltersModal(false);
+            // New filters should replace deck - clear and refetch
+            setCurrentIndex(0);
+            setDeck([]);
+            setPage(0); // Reset page to 0
+            clearSessionExcludes();
+            // Ensure a fresh fetch immediately
+            refetchDiscovery();
+          }} 
+        />
       </SafeAreaView>
     </GradientBackground>
   );
@@ -1271,9 +1233,25 @@ const styles = StyleSheet.create({
     color: colors.text, 
     fontSize: 28, 
     fontWeight: '700', 
-    textAlign: 'center', 
-    marginBottom: spacing(1), 
+    textAlign: 'right', 
+    marginBottom: spacing(0.5), 
     paddingHorizontal: spacing(2) 
+  },
+  headerRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing(2),
+    marginBottom: spacing(1),
+  },
+  filterButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.soft,
   },
   loadingText: { 
     color: colors.text, 

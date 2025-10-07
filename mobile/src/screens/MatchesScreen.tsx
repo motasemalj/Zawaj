@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Alert } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
 import { getClient, Match, useApiState } from '../api/client';
 import { colors, radii, shadows, spacing } from '../theme';
 import Avatar from '../components/ui/Avatar';
@@ -10,6 +9,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import ProfileDetailModal from '../components/ProfileDetailModal';
 import { Ionicons } from '@expo/vector-icons';
 import { feedback } from '../utils/haptics';
+import { useMatches, useUnmatch } from '../api/hooks';
 
 export default function MatchesScreen() {
   const currentUserId = useApiState((state) => state.currentUserId);
@@ -20,10 +20,8 @@ export default function MatchesScreen() {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [unmatchingId, setUnmatchingId] = useState<string | null>(null);
 
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['matches'],
-    queryFn: async () => (await api.get('/matches')).data.matches as Match[],
-  });
+  const { data, refetch, isFetching } = useMatches();
+  const unmatchMutation = useUnmatch();
 
   useFocusEffect(
     React.useCallback(() => {
@@ -43,19 +41,19 @@ export default function MatchesScreen() {
         {
           text: 'إلغاء التوافق',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              setUnmatchingId(matchId);
-              await api.delete(`/matches/${matchId}`);
-              refetch(); // Refresh the matches list
-              // Add success feedback
-              feedback.success();
-            } catch (error: any) {
-              feedback.error();
-              Alert.alert('خطأ', error.response?.data?.message || 'فشل في إلغاء التوافق');
-            } finally {
-              setUnmatchingId(null);
-            }
+          onPress: () => {
+            setUnmatchingId(matchId);
+            unmatchMutation.mutate(matchId, {
+              onSuccess: () => {
+                setUnmatchingId(null);
+                feedback.success();
+              },
+              onError: (error: any) => {
+                setUnmatchingId(null);
+                feedback.error();
+                Alert.alert('خطأ', error.response?.data?.message || 'فشل في إلغاء التوافق');
+              },
+            });
           },
         },
       ]
@@ -106,7 +104,10 @@ export default function MatchesScreen() {
                 <TouchableOpacity
                   style={styles.card}
                   activeOpacity={0.85}
-                  onPress={() => nav.navigate('Chat', { matchId: item.id })}
+                  onPress={() => {
+                    feedback.buttonPress();
+                    nav.navigate('Chat', { matchId: item.id });
+                  }}
                 >
                   <View style={styles.cardContent}>
                     <Avatar 
@@ -129,19 +130,28 @@ export default function MatchesScreen() {
                     <View style={styles.actions}>
                       <TouchableOpacity
                         style={styles.previewBtn}
-                        onPress={openPreview}
+                        onPress={() => {
+                          feedback.buttonPress();
+                          openPreview();
+                        }}
                       >
                         <Ionicons name="id-card" size={18} color={colors.text} />
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.chatBtn}
-                        onPress={() => nav.navigate('Chat', { matchId: item.id })}
+                        onPress={() => {
+                          feedback.buttonPress();
+                          nav.navigate('Chat', { matchId: item.id });
+                        }}
                       >
                         <Ionicons name="chatbubble" size={18} color="#000" />
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.unmatchBtn, unmatchingId === item.id && styles.unmatchBtnDisabled]}
-                        onPress={() => handleUnmatch(item.id, other?.display_name || 'هذا الشخص')}
+                        onPress={() => {
+                          feedback.important();
+                          handleUnmatch(item.id, other?.display_name || 'هذا الشخص');
+                        }}
                         disabled={unmatchingId === item.id}
                       >
                         <Ionicons 

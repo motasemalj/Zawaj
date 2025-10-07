@@ -16,17 +16,20 @@ import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { getClient, useApiState } from '../api/client';
+import { resetDiscoverySession } from '../api/hooks';
 import { colors, spacing, radii, shadows } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import GradientBackground from '../components/ui/GradientBackground';
 import Button from '../components/ui/Button';
 import ErrorMessage from '../components/ui/ErrorMessage';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function SuperEnhancedSettingsScreen() {
   const api = getClient();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const { setCurrentUserId, currentUserId } = useApiState();
+  const queryClient = useQueryClient();
   
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +157,11 @@ export default function SuperEnhancedSettingsScreen() {
         {
           text: 'تسجيل الخروج',
           style: 'destructive',
-          onPress: () => setCurrentUserId(null),
+          onPress: () => {
+            resetDiscoverySession(); // Clear session excludes on logout
+            queryClient.clear(); // Clear ALL React Query cache
+            setCurrentUserId(null);
+          },
         },
       ]
     );

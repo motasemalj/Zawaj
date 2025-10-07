@@ -22,6 +22,7 @@ import ErrorMessage from '../components/ui/ErrorMessage';
 import Avatar from '../components/ui/Avatar';
 import GradientBackground from '../components/ui/GradientBackground';
 import PhotoPickerModal from '../components/ui/PhotoPickerModal';
+import { useCurrentUser, useOnboardingOptions, useUpdateProfile, useUploadPhoto, useDeletePhoto, useReorderPhotos } from '../api/hooks';
 
 interface PhotoItem {
   id: string;
@@ -32,130 +33,135 @@ interface PhotoItem {
 export default function EnhancedProfileScreen() {
   const api = getClient();
   const insets = useSafeAreaInsets();
-  const [user, setUser] = useState<any>(null);
-  const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  
+  // React Query hooks
+  const { data: userData, isLoading: userLoading, error: userError } = useCurrentUser();
+  const { data: optionsData } = useOnboardingOptions();
+  const updateProfileMutation = useUpdateProfile();
+  const uploadPhotoMutation = useUploadPhoto();
+  const deletePhotoMutation = useDeletePhoto();
+  const reorderPhotosMutation = useReorderPhotos();
+  
+  // Show error if query fails
+  useEffect(() => {
+    if (userError) {
+      const err = userError as any;
+      console.error('Profile screen error:', err.response?.status, err.message);
+      setError('فشل تحميل الملف الشخصي');
+    }
+  }, [userError]);
+  
+  const user = userData;
+  const options = optionsData || {};
+  const photos = (user?.photos || []).sort((a: any, b: any) => a.ordering - b.ordering);
+  
   const [photosBlurred, setPhotosBlurred] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingDemographics, setEditingDemographics] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [options, setOptions] = useState<any>({});
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
 
+  // Sync state from user data
   useEffect(() => {
-    loadProfile();
-    loadOptions();
-  }, []);
-
-  async function loadOptions() {
-    try {
-      const res = await api.get('/onboarding/options');
-      setOptions(res.data);
-    } catch (err) {
-      console.error('Failed to load options', err);
-    }
-  }
-
-  async function loadProfile() {
-    try {
-      const res = await api.get('/users/me');
-      setUser(res.data);
-      setPhotos((res.data.photos || []).sort((a: any, b: any) => a.ordering - b.ordering));
-      setPhotosBlurred(res.data.photos_blurred || false);
+    if (user) {
+      setPhotosBlurred(user.photos_blurred || false);
       setFormData({
-        bio: res.data.bio || '',
-        ethnicity: res.data.ethnicity || '',
-        marriage_timeline: res.data.marriage_timeline || '',
-        sect: res.data.sect || '',
-        children_preference: res.data.children_preference || '',
-        want_children: res.data.want_children || '',
-        relocate: res.data.relocate || false,
-        profession: res.data.profession || '',
-        education: res.data.education || '',
-        hometown: `${res.data.city || ''}, ${res.data.country || ''}`.replace(/^, |, $/, ''),
-        smoker: res.data.smoker || '',
-        marital_status: res.data.marital_status || '',
+        bio: user.bio || '',
+        ethnicity: user.ethnicity || '',
+        marriage_timeline: user.marriage_timeline || '',
+        sect: user.sect || '',
+        children_preference: user.children_preference || '',
+        want_children: user.want_children || '',
+        relocate: user.relocate || false,
+        profession: user.profession || '',
+        education: user.education || '',
+        hometown: `${user.city || ''}, ${user.country || ''}`.replace(/^, |, $/, ''),
+        smoker: user.smoker || '',
+        marital_status: user.marital_status || '',
       });
-    } catch (err: any) {
-      setError('فشل تحميل الملف الشخصي');
     }
+  }, [user]);
+
+
+  function saveAboutMe() {
+    setError(null);
+    const updateData: any = {
+      bio: formData.bio,
+      ethnicity: formData.ethnicity,
+      marriage_timeline: formData.marriage_timeline,
+      sect: formData.sect,
+      children_preference: formData.children_preference,
+      want_children: formData.want_children,
+      relocate: formData.relocate,
+    };
+    
+    updateProfileMutation.mutate(updateData, {
+      onSuccess: () => {
+        setSuccess('تم حفظ التغييرات بنجاح');
+        setEditing(false);
+        setTimeout(() => setSuccess(null), 3000);
+      },
+      onError: (err: any) => {
+        setError(err.response?.data?.message || 'فشل حفظ التغييرات');
+      },
+    });
   }
 
-  async function saveAboutMe() {
-    try {
-      setError(null);
-      const updateData: any = {
-        bio: formData.bio,
-        ethnicity: formData.ethnicity,
-        marriage_timeline: formData.marriage_timeline,
-        sect: formData.sect,
-        children_preference: formData.children_preference,
-        want_children: formData.want_children,
-        relocate: formData.relocate,
-      };
-      await api.put('/users/me', updateData);
-      setSuccess('تم حفظ التغييرات بنجاح');
-      setEditing(false);
-      loadProfile();
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'فشل حفظ التغييرات');
-    }
-  }
-
-  async function saveDemographics() {
-    try {
-      setError(null);
-      const [city, country] = formData.hometown.split(',').map((s: string) => s.trim());
-      const updateData: any = {
-        profession: formData.profession,
-        education: formData.education,
-        city: city || formData.hometown,
-        country: country || '',
-        smoker: formData.smoker,
-        marital_status: formData.marital_status,
-      };
-      await api.put('/users/me', updateData);
-      setSuccess('تم حفظ التغييرات بنجاح');
-      setEditingDemographics(false);
-      loadProfile();
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'فشل حفظ التغييرات');
-    }
+  function saveDemographics() {
+    setError(null);
+    const [city, country] = formData.hometown.split(',').map((s: string) => s.trim());
+    const updateData: any = {
+      profession: formData.profession,
+      education: formData.education,
+      city: city || formData.hometown,
+      country: country || '',
+      smoker: formData.smoker,
+      marital_status: formData.marital_status,
+    };
+    
+    updateProfileMutation.mutate(updateData, {
+      onSuccess: () => {
+        setSuccess('تم حفظ التغييرات بنجاح');
+        setEditingDemographics(false);
+        setTimeout(() => setSuccess(null), 3000);
+      },
+      onError: (err: any) => {
+        setError(err.response?.data?.message || 'فشل حفظ التغييرات');
+      },
+    });
   }
 
   function showPhotoPickerModal() {
     setShowPhotoPicker(true);
   }
 
-  async function handleImageSelected(uri: string) {
-    try {
-      if (photos.length >= 5) {
-        setError('الحد الأقصى 5 صور');
-        return;
-      }
-      
-      const form = new FormData();
-      form.append('photos', {
-        uri: uri,
-        name: 'photo.jpg',
-        type: 'image/jpeg',
-      } as any);
-      
-      const res = await api.put('/photos/me/photos', form, { 
-        headers: { 'Content-Type': 'multipart/form-data' } 
-      });
-      setPhotos((res.data.photos || []).sort((a: any, b: any) => a.ordering - b.ordering));
-      setSuccess('تمت إضافة الصورة بنجاح');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'فشل رفع الصورة');
+  function handleImageSelected(uri: string) {
+    if (photos.length >= 5) {
+      setError('الحد الأقصى 5 صور');
+      return;
     }
+    
+    const form = new FormData();
+    form.append('photos', {
+      uri: uri,
+      name: 'photo.jpg',
+      type: 'image/jpeg',
+    } as any);
+    
+    uploadPhotoMutation.mutate(form, {
+      onSuccess: () => {
+        setSuccess('تمت إضافة الصورة بنجاح');
+        setTimeout(() => setSuccess(null), 3000);
+      },
+      onError: (err: any) => {
+        setError(err.response?.data?.message || 'فشل رفع الصورة');
+      },
+    });
   }
 
-  async function deletePhoto(photoId: string) {
+  function deletePhoto(photoId: string) {
     if (photos.length <= 1) {
       Alert.alert('لا يمكن الحذف', 'يجب أن تحتوي على صورة واحدة على الأقل في ملفك.');
       return;
@@ -168,59 +174,62 @@ export default function EnhancedProfileScreen() {
         { 
           text: 'حذف', 
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete(`/photos/me/photos/${photoId}`);
-              setPhotos(photos.filter(p => p.id !== photoId));
-              setSuccess('تم حذف الصورة');
-              setTimeout(() => setSuccess(null), 3000);
-            } catch (err: any) {
-              setError('فشل حذف الصورة');
-            }
+          onPress: () => {
+            deletePhotoMutation.mutate(photoId, {
+              onSuccess: () => {
+                setSuccess('تم حذف الصورة');
+                setTimeout(() => setSuccess(null), 3000);
+              },
+              onError: () => {
+                setError('فشل حذف الصورة');
+              },
+            });
           }
         }
       ]
     );
   }
 
-  async function movePhoto(photoId: string, direction: 'left' | 'right') {
-    try {
-      const currentIndex = photos.findIndex(p => p.id === photoId);
-      if (currentIndex === -1) return;
-      
-      const newIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
-      if (newIndex < 0 || newIndex >= photos.length) return;
-      
-      // Swap photos
-      const newPhotos = [...photos];
-      [newPhotos[currentIndex], newPhotos[newIndex]] = [newPhotos[newIndex], newPhotos[currentIndex]];
-      
-      // Update ordering
-      const reordered = newPhotos.map((p, idx) => ({ ...p, ordering: idx }));
-      setPhotos(reordered);
-      
-      // Send to backend
-      const order = reordered.map((p, idx) => ({ id: p.id, order: idx }));
-      await api.put('/photos/me/reorder', { order });
-    } catch (err: any) {
-      setError('فشل إعادة ترتيب الصور');
-      loadProfile(); // Revert on error
-    }
+  function movePhoto(photoId: string, direction: 'left' | 'right') {
+    const currentIndex = photos.findIndex(p => p.id === photoId);
+    if (currentIndex === -1) return;
+    
+    const newIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= photos.length) return;
+    
+    // Swap photos
+    const newPhotos = [...photos];
+    [newPhotos[currentIndex], newPhotos[newIndex]] = [newPhotos[newIndex], newPhotos[currentIndex]];
+    
+    // Update ordering
+    const reordered = newPhotos.map((p, idx) => ({ ...p, ordering: idx }));
+    
+    // Send to backend
+    const photosToReorder = reordered.map((p, idx) => ({ id: p.id, order: idx }));
+    reorderPhotosMutation.mutate({ photos: photosToReorder }, {
+      onError: () => {
+        setError('فشل إعادة ترتيب الصور');
+      },
+    });
   }
 
-  async function toggleBlur() {
-    try {
-      const newBlurState = !photosBlurred;
-      await api.put('/users/me', { photos_blurred: newBlurState });
-      setPhotosBlurred(newBlurState);
-      setSuccess(newBlurState ? 'تم إخفاء الصور' : 'تم إظهار الصور');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError('فشل تغيير حالة الإخفاء');
-    }
+  function toggleBlur() {
+    const newBlurState = !photosBlurred;
+    setPhotosBlurred(newBlurState); // Optimistic update
+    
+    updateProfileMutation.mutate({ photos_blurred: newBlurState }, {
+      onSuccess: () => {
+        setSuccess(newBlurState ? 'تم إخفاء الصور' : 'تم إظهار الصور');
+        setTimeout(() => setSuccess(null), 3000);
+      },
+      onError: () => {
+        setPhotosBlurred(!newBlurState); // Revert on error
+        setError('فشل تغيير حالة الإخفاء');
+      },
+    });
   }
 
-  if (!user) {
+  if (userLoading || !user) {
     return (
       <GradientBackground>
         <View style={[styles.container, { paddingTop: insets.top }]}>

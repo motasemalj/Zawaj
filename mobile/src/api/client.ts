@@ -15,11 +15,27 @@ export const useApiState = create<ApiState>((set) => ({
   setCurrentUserId: (id) => set({ currentUserId: id }),
 }));
 
+// Create a singleton axios instance
+let apiInstance: ReturnType<typeof axios.create> | null = null;
+
 export function getClient() {
-  const { baseUrl, currentUserId } = useApiState.getState();
-  const instance = axios.create({ baseURL: baseUrl, timeout: 10000 });
-  if (currentUserId) instance.defaults.headers.common['x-user-id'] = currentUserId;
-  return instance;
+  if (!apiInstance) {
+    const { baseUrl } = useApiState.getState();
+    apiInstance = axios.create({ baseURL: baseUrl, timeout: 10000 });
+    
+    // Add interceptor to dynamically set user ID on each request
+    apiInstance.interceptors.request.use((config) => {
+      const { currentUserId } = useApiState.getState();
+      if (currentUserId) {
+        config.headers['x-user-id'] = currentUserId;
+      } else {
+        delete config.headers['x-user-id'];
+      }
+      return config;
+    });
+  }
+  
+  return apiInstance;
 }
 
 export type User = {

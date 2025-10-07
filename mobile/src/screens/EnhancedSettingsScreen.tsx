@@ -6,16 +6,19 @@ import Slider from '@react-native-community/slider';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { getClient, useApiState } from '../api/client';
+import { resetDiscoverySession } from '../api/hooks';
 import { colors, spacing, radii, shadows } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ErrorMessage from '../components/ui/ErrorMessage';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function EnhancedSettingsScreen() {
   const api = getClient();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { setCurrentUserId } = useApiState();
+  const queryClient = useQueryClient();
   const [blur, setBlur] = useState(false);
   const [reveal, setReveal] = useState(true);
   const [photos, setPhotos] = useState<{ url: string; id: string }[]>([]);
@@ -277,6 +280,8 @@ export default function EnhancedSettingsScreen() {
           text: 'تسجيل الخروج',
           style: 'destructive',
           onPress: () => {
+            resetDiscoverySession(); // Clear session excludes on logout
+            queryClient.clear(); // Clear ALL React Query cache
             setCurrentUserId(null);
           },
         },

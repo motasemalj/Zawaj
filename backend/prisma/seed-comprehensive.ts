@@ -64,26 +64,48 @@ async function main() {
     
     // High religiousness males
     {
-      role: 'male', display_name: 'أحمد المحمود', dob: yearsAgo(28), 
+      role: 'male', gender: 'male', display_name: 'أحمد المحمود', first_name: 'أحمد', dob: yearsAgo(28), 
       city: locations[0].city, country: locations[0].country,
       location: JSON.stringify({ lat: locations[0].lat, lng: locations[0].lng }),
-      nationality: 'سعودي', muslim_affirmed: true, religiousness: 5, prayer_freq: 'always',
+      nationality: 'سعودي', ethnicity: JSON.stringify(['السعودية 🇸🇦']),
+      muslim_affirmed: true, onboarding_completed: true, terms_accepted: true,
+      religiousness: 5, prayer_freq: 'always', sect: 'سني',
+      quran_engagement: 'حافظ', fasting_ramadan: 'yes',
       beard: 'full', halal_diet: 'strict', education: 'ماجستير', profession: 'مهندس برمجيات',
       height_cm: 178, marital_status: 'single', want_children: 'yes',
+      children_preference: 'want_children', relocate: false,
+      smoker: 'no', fitness_level: 'active', dietary_preferences: 'halal_only',
+      marriage_timeline: 'within_6_months',
       bio: 'حافظ للقرآن، أبحث عن زوجة صالحة محافظة',
-      interests: JSON.stringify(['قرآن', 'برمجة', 'قراءة']),
+      interests: JSON.stringify(['قرآن', 'برمجة', 'قراءة', 'رياضة', 'سفر']),
+      personality_traits: JSON.stringify(['طموح', 'ملتزم', 'صادق', 'مسؤول', 'متفائل']),
+      icebreaker_questions: JSON.stringify([
+        { prompt: 'ما هدفك في الحياة؟', answer: 'بناء أسرة صالحة', type: 'text' },
+        { prompt: 'هوايتك المفضلة؟', answer: 'قراءة القرآن', type: 'text' }
+      ]),
       languages: JSON.stringify(['العربية', 'الإنجليزية']),
       income_range: '15000-25000',
       imageUrl: 'https://i.pravatar.cc/400?img=12'
     },
     {
-      role: 'male', display_name: 'خالد العتيبي', dob: yearsAgo(32),
+      role: 'male', gender: 'male', display_name: 'خالد العتيبي', first_name: 'خالد', dob: yearsAgo(32),
       city: locations[1].city, country: locations[1].country, location: JSON.stringify({ lat: locations[1].lat, lng: locations[1].lng }),
-      nationality: 'سعودي', muslim_affirmed: true, religiousness: 5, prayer_freq: 'always',
+      nationality: 'سعودي', ethnicity: JSON.stringify(['السعودية 🇸🇦']),
+      muslim_affirmed: true, onboarding_completed: true, terms_accepted: true,
+      religiousness: 5, prayer_freq: 'always', sect: 'سني',
+      quran_engagement: 'يومي', fasting_ramadan: 'yes',
       beard: 'trimmed', halal_diet: 'strict', education: 'دكتوراه', profession: 'طبيب',
       height_cm: 182, marital_status: 'single', want_children: 'yes',
+      children_preference: 'want_children', relocate: false,
+      smoker: 'no', fitness_level: 'very_active', dietary_preferences: 'halal_only',
+      marriage_timeline: '6_12_months',
       bio: 'طبيب قلب، ملتزم دينياً، أبحث عن شريكة حياة',
-      interests: JSON.stringify(['طب', 'رياضة', 'سفر']),
+      interests: JSON.stringify(['طب', 'رياضة', 'سفر', 'قراءة', 'عائلة']),
+      personality_traits: JSON.stringify(['طموح', 'رحيم', 'صبور', 'ملتزم', 'متفاني']),
+      icebreaker_questions: JSON.stringify([
+        { prompt: 'لماذا اخترت الطب؟', answer: 'لخدمة الناس', type: 'text' },
+        { prompt: 'ما حلمك؟', answer: 'طبيب ماهر وأب صالح', type: 'text' }
+      ]),
       languages: JSON.stringify(['العربية', 'الإنجليزية']),
       income_range: '25000+',
       imageUrl: 'https://i.pravatar.cc/400?img=13'

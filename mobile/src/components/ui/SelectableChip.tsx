@@ -2,6 +2,7 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
 import { colors, radii, spacing } from '../../theme';
 import { LinearGradient } from 'expo-linear-gradient';
+import { feedback } from '../../utils/haptics';
 
 type SelectableChipProps = {
   label: string;
@@ -11,9 +12,14 @@ type SelectableChipProps = {
 };
 
 export default function SelectableChip({ label, selected, onPress, style }: SelectableChipProps) {
+  const handlePress = () => {
+    feedback.selection();
+    onPress();
+  };
+
   if (selected) {
     return (
-      <TouchableOpacity onPress={onPress} style={[{ borderRadius: radii.pill, overflow: 'hidden' }, style]}>
+      <TouchableOpacity onPress={handlePress} style={[{ borderRadius: radii.pill, overflow: 'hidden' }, style]}>
         <LinearGradient
           colors={['#fe3c72', '#ff5864']}
           start={{ x: 0, y: 0 }}
@@ -27,7 +33,7 @@ export default function SelectableChip({ label, selected, onPress, style }: Sele
   }
 
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.chip, style]}>
+    <TouchableOpacity onPress={handlePress} style={[styles.chip, style]}>
       <Text style={styles.text}>{label}</Text>
     </TouchableOpacity>
   );

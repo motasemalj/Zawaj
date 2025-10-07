@@ -35,27 +35,43 @@ router.post('/', async (req: AuthedRequest, res, next) => {
       return res.status(400).json({ error: 'Invalid account state: mother_for is required for mother role' });
     }
 
-    // Eligibility per role
+    // Normalize role values to be resilient to data entry issues (e.g., 'fe male')
+    const normalizeRole = (r?: string | null) => (r || '').toLowerCase().replace(/\s+/g, '');
+    const myRole = normalizeRole(me.role);
+    const targetRole = normalizeRole(toUser.role);
+    const targetMotherFor = (toUser.mother_for || '').toLowerCase();
+    const myMotherFor = (me.mother_for || '').toLowerCase();
+
+    // Eligibility per role (normalized)
     const eligible = (() => {
-      if (me.role === 'male') return toUser.role === 'female';
-      if (me.role === 'female') return toUser.role === 'male';
-      if (me.role === 'mother' && me.mother_for === 'son') return toUser.role === 'female' || (toUser.role === 'mother' && toUser.mother_for === 'daughter');
-      if (me.role === 'mother' && me.mother_for === 'daughter') return toUser.role === 'male' || (toUser.role === 'mother' && toUser.mother_for === 'son');
+      if (myRole === 'male') return targetRole === 'female';
+      if (myRole === 'female') return targetRole === 'male';
+      if (myRole === 'mother' && myMotherFor === 'son') return targetRole === 'female' || (targetRole === 'mother' && targetMotherFor === 'daughter');
+      if (myRole === 'mother' && myMotherFor === 'daughter') return targetRole === 'male' || (targetRole === 'mother' && targetMotherFor === 'son');
       return false;
     })();
     if (!eligible) {
       console.log('Swipe eligibility failed:', { myRole: me.role, myMotherFor: me.mother_for, targetRole: toUser.role, targetMotherFor: toUser.mother_for });
-      return res.status(403).json({ error: 'Not eligible to swipe this user', details: { myRole: me.role, myMotherFor: me.mother_for, targetRole: toUser.role } });
+      return res.status(422).json({ error: 'Not eligible to swipe this user', details: { myRole: me.role, myMotherFor: me.mother_for, targetRole: toUser.role } });
     }
 
-    const swipe = await prisma.swipe.create({
-      data: { 
+    // Use upsert to handle the unique constraint (allows re-swiping after undo)
+    const swipe = await prisma.swipe.upsert({
+      where: { 
+        from_user_id_to_user_id: { from_user_id: me.id, to_user_id }
+      },
+      update: {
+        direction,
+        is_super_like: is_super_like && direction === 'right' ? true : false,
+      },
+      create: { 
         from_user_id: me.id, 
         to_user_id, 
         direction,
         is_super_like: is_super_like && direction === 'right' ? true : false
       },
     });
+    console.log(`✅ Swipe saved: ${me.id} -> ${to_user_id} (${direction}, super_like: ${is_super_like})`);
 
     let match = null as any;
     if (direction === 'right') {
@@ -121,6 +137,7 @@ router.post('/undo', async (req: AuthedRequest, res, next) => {
     await prisma.swipe.delete({
       where: { id: lastSwipe.id },
     });
+    console.log(`Deleted swipe ${lastSwipe.id} for ${me.id} -> ${lastSwipe.to_user_id}`);
     
     res.json({ 
       undone: true, 

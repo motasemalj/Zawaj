@@ -17,7 +17,9 @@ import { colors, radii, shadows, spacing } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../components/ui/Avatar';
 import GradientBackground from '../components/ui/GradientBackground';
+import { feedback } from '../utils/haptics';
 import MatchPreviewModal, { formatUserLocation } from '../components/MatchPreviewModal';
+import { useMatch, useMessages, useSendMessage } from '../api/hooks';
 
 export default function ChatScreen() {
   const route = useRoute<RouteProp<any>>();
@@ -25,14 +27,20 @@ export default function ChatScreen() {
   const currentUserId = useApiState((state) => state.currentUserId);
   const api = useMemo(() => getClient(), [currentUserId]);
   const baseUrl = api.defaults.baseURL;
-  const [messages, setMessages] = useState<Message[]>([]);
+  
+  // React Query hooks
+  const { data: match } = useMatch(matchId);
+  const { data: messagesData } = useMessages(matchId);
+  const sendMessageMutation = useSendMessage();
+  
   const [text, setText] = useState('');
   const [guardian, setGuardian] = useState(false);
-  const [match, setMatch] = useState<Match | null>(null);
   const [cardVisible, setCardVisible] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Message> | null>(null);
+  
+  const messages = messagesData || [];
 
   const otherUser = useMemo(() => {
     if (!match || !currentUserId) return null;
@@ -44,73 +52,32 @@ export default function ChatScreen() {
     return match.user_a.id === currentUserId ? match.user_a : match.user_b;
   }, [match, currentUserId]);
 
-  const loadMatch = useCallback(async () => {
-    const res = await api.get(`/matches/${matchId}`);
-    const m = res.data as Match;
-    setMatch(m);
-    const a = m.user_a?.role as string;
-    const b = m.user_b?.role as string;
-    setGuardian(a === 'mother' || b === 'mother');
-  }, [api, matchId]);
+  // Set guardian flag when match data loads
+  useEffect(() => {
+    if (match) {
+      const a = match.user_a?.role as string;
+      const b = match.user_b?.role as string;
+      setGuardian(a === 'mother' || b === 'mother');
+    }
+  }, [match]);
 
-  const loadMessages = useCallback(async () => {
-    const res = await api.get(`/messages/${matchId}/messages`);
-    setMessages(res.data.messages);
-  }, [api, matchId]);
-
-  async function send() {
+  function send() {
     if (!text.trim()) return;
     const messageText = text;
-    
-    // Optimistic update - add message immediately to UI
-    const tempMessage = {
-      id: `temp-${Date.now()}`,
-      match_id: matchId,
-      sender_id: currentUserId!,
-      text: messageText,
-      created_at: new Date().toISOString(),
-      read_at: null,
-      flagged: false,
-    };
-    
-    setMessages((m) => [...m, tempMessage]);
     setText('');
     
-    // Scroll to bottom immediately
+    sendMessageMutation.mutate({
+      match_id: matchId,
+      text: messageText,
+    });
+    
+    // Scroll to bottom after sending
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
-    }, 50);
-    
-    // Send to backend in background
-    try {
-      const res = await api.post(`/messages/${matchId}/messages`, { text: messageText });
-      // Replace temp message with real one
-      setMessages((m) => m.map(msg => msg.id === tempMessage.id ? res.data : msg));
-    } catch (err) {
-      console.error('Failed to send message:', err);
-      // Remove temp message on error
-      setMessages((m) => m.filter(msg => msg.id !== tempMessage.id));
-    }
+    }, 100);
   }
 
-  // Avoid overlapping poll requests
-  const messagesInFlightRef = useRef(false);
-
-  useEffect(() => {
-    loadMatch();
-    (async () => {
-      if (messagesInFlightRef.current) return;
-      messagesInFlightRef.current = true;
-      try { await loadMessages(); } finally { messagesInFlightRef.current = false; }
-    })();
-
-    const id = setInterval(async () => {
-      if (messagesInFlightRef.current) return;
-      messagesInFlightRef.current = true;
-      try { await loadMessages(); } finally { messagesInFlightRef.current = false; }
-    }, 1500); // faster polling for near-realtime feel
-    return () => clearInterval(id);
-  }, [loadMatch, loadMessages]);
+  // React Query handles polling automatically via refetchInterval
 
   useEffect(() => {
     if (!messages.length) return;
@@ -156,7 +123,10 @@ export default function ChatScreen() {
         >
           <View style={styles.flex}>
             {match && (
-              <TouchableOpacity style={styles.header} activeOpacity={0.85} onPress={() => setCardVisible(true)}>
+              <TouchableOpacity style={styles.header} activeOpacity={0.85} onPress={() => {
+                feedback.buttonPress();
+                setCardVisible(true);
+              }}>
                 <Avatar
                   uri={otherUser?.photos?.[0]?.url}
                   label={otherUser?.display_name}
@@ -259,7 +229,10 @@ export default function ChatScreen() {
                     }, 400);
                   }}
                 />
-                <TouchableOpacity onPress={send} style={styles.send}>
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  send();
+                }} style={styles.send}>
                   <Ionicons name="send" size={18} color="#000" />
                 </TouchableOpacity>
               </View>

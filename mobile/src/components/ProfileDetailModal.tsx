@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, shadows } from '../theme';
 import { User } from '../api/client';
 import Avatar from './ui/Avatar';
+import { feedback } from '../utils/haptics';
 import { getClient } from '../api/client';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -107,7 +108,10 @@ export default function ProfileDetailModal({
       <SafeAreaView style={[styles.modalContainer, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, spacing(2)) }]}> 
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={() => {
+            feedback.buttonPress();
+            onClose();
+          }} style={styles.closeButton}>
             <Ionicons name="chevron-down" size={32} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>الملف الشخصي</Text>
@@ -129,12 +133,18 @@ export default function ProfileDetailModal({
                   {user.photos.length > 1 && (
                     <>
                       {currentPhotoIndex > 0 && (
-                        <TouchableOpacity onPress={prevPhoto} style={styles.photoNavLeft}>
+                        <TouchableOpacity onPress={() => {
+                          feedback.buttonPress();
+                          prevPhoto();
+                        }} style={styles.photoNavLeft}>
                           <Ionicons name="chevron-back" size={28} color="#fff" />
                         </TouchableOpacity>
                       )}
                       {currentPhotoIndex < user.photos.length - 1 && (
-                        <TouchableOpacity onPress={nextPhoto} style={styles.photoNavRight}>
+                        <TouchableOpacity onPress={() => {
+                          feedback.buttonPress();
+                          nextPhoto();
+                        }} style={styles.photoNavRight}>
                           <Ionicons name="chevron-forward" size={28} color="#fff" />
                         </TouchableOpacity>
                       )}
@@ -267,17 +277,26 @@ export default function ProfileDetailModal({
         {(onLike || onPass || onSuperLike) && (
           <View style={styles.actionBar}>
             {onPass && (
-              <TouchableOpacity onPress={onPass} style={[styles.actionButton, styles.passButton]}>
+              <TouchableOpacity onPress={() => {
+                feedback.buttonPress();
+                onPass();
+              }} style={[styles.actionButton, styles.passButton]}>
                 <Ionicons name="close" size={32} color="#fff" />
               </TouchableOpacity>
             )}
             {onSuperLike && (
-              <TouchableOpacity onPress={onSuperLike} style={[styles.actionButton, styles.superButton]}>
+              <TouchableOpacity onPress={() => {
+                feedback.buttonPress();
+                onSuperLike();
+              }} style={[styles.actionButton, styles.superButton]}>
                 <Ionicons name="star" size={28} color="#fff" />
               </TouchableOpacity>
             )}
             {onLike && (
-              <TouchableOpacity onPress={onLike} style={[styles.actionButton, styles.likeButton]}>
+              <TouchableOpacity onPress={() => {
+                feedback.buttonPress();
+                onLike();
+              }} style={[styles.actionButton, styles.likeButton]}>
                 <Ionicons name="heart" size={32} color="#fff" />
               </TouchableOpacity>
             )}

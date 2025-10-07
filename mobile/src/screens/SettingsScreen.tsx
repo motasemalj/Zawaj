@@ -2,15 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Switch, StyleSheet, TouchableOpacity, Image, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { getClient, useApiState } from '../api/client';
+import { resetDiscoverySession } from '../api/hooks';
 import { colors, spacing, radii } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ErrorMessage from '../components/ui/ErrorMessage';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function SettingsScreen() {
   const api = getClient();
   const navigation = useNavigation();
   const { setCurrentUserId } = useApiState();
+  const queryClient = useQueryClient();
   const [blur, setBlur] = useState(false);
   const [reveal, setReveal] = useState(true);
   const [photos, setPhotos] = useState<{ url: string }[]>([]);
@@ -61,6 +64,8 @@ export default function SettingsScreen() {
           text: 'تسجيل الخروج',
           style: 'destructive',
           onPress: () => {
+            resetDiscoverySession(); // Clear session excludes on logout
+            queryClient.clear(); // Clear ALL React Query cache
             setCurrentUserId(null);
             // Navigation will automatically update when currentUserId changes
           },

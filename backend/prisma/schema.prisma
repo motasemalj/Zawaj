@@ -88,6 +88,8 @@ model User {
   blocks_given       Block[]   @relation("blocks_given")
   blocks_received    Block[]   @relation("blocks_received")
   audit_logs         AuditLog[] @relation("audit_sender")
+  discovery_seen_out DiscoverySeen[] @relation("discovery_seen_viewer")
+  discovery_seen_in  DiscoverySeen[] @relation("discovery_seen_target")
 }
 
 model Photo {
@@ -140,6 +142,7 @@ model Swipe {
   is_super_like Boolean  @default(false)
   created_at    DateTime @default(now())
 
+  @@unique([from_user_id, to_user_id])
   @@index([from_user_id, to_user_id])
 }
 
@@ -220,5 +223,16 @@ model EmailOtp {
   created_at DateTime @default(now())
 
   @@index([email])
+}
+
+model DiscoverySeen {
+  id            String   @id @default(cuid())
+  viewer        User     @relation("discovery_seen_viewer", fields: [viewer_id], references: [id], onDelete: Cascade)
+  viewer_id     String
+  seen_user     User     @relation("discovery_seen_target", fields: [seen_user_id], references: [id], onDelete: Cascade)
+  seen_user_id  String
+  created_at    DateTime @default(now())
+
+  @@unique([viewer_id, seen_user_id])
 }
 

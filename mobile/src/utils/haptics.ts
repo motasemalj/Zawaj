@@ -30,34 +30,30 @@ export const soundEffects = generatedSounds;
 
 // Combined feedback for common actions
 export const feedback = {
-  // Button press with haptic and sound
-  buttonPress: async () => {
+  // Button press with haptic only
+  buttonPress: () => {
     hapticFeedback.light();
-    await soundEffects.button();
   },
   
-  // Match with celebration haptic and sound
+  // Match with celebration haptic and beautiful sound
   match: async () => {
     hapticFeedback.success();
     await soundEffects.match();
   },
   
-  // Swipe with subtle feedback
-  swipe: async () => {
+  // Swipe with haptic only
+  swipe: () => {
     hapticFeedback.light();
-    await soundEffects.swipe();
   },
   
-  // Success action
-  success: async () => {
+  // Success action with haptic only
+  success: () => {
     hapticFeedback.success();
-    await soundEffects.success();
   },
   
-  // Error action
-  error: async () => {
+  // Error action with haptic only
+  error: () => {
     hapticFeedback.error();
-    await soundEffects.error();
   },
   
   // Toggle/switch selection

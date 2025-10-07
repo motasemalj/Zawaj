@@ -23,15 +23,38 @@ import GradientBackground from '../components/ui/GradientBackground';
 import Button from '../components/ui/Button';
 import ErrorMessage from '../components/ui/ErrorMessage';
 import { feedback } from '../utils/haptics';
+import SearchFiltersModal from '../components/SearchFiltersModal';
+import { useCurrentUser, useUpdateProfile, useUpdatePreferences, useUpdateDevice, useDeleteAccount, useOnboardingOptions, resetDiscoverySession } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function UltraEnhancedSettingsScreen() {
   const api = getClient();
   const insets = useSafeAreaInsets();
   const { setCurrentUserId } = useApiState();
+  const queryClient = useQueryClient();
+  
+  // React Query hooks
+  const { data: userData, isLoading: userLoading, error: userError, refetch: refetchUser } = useCurrentUser();
+  const { data: optionsData } = useOnboardingOptions();
+  const updateProfileMutation = useUpdateProfile();
+  const updatePreferencesMutation = useUpdatePreferences();
+  const updateDeviceMutation = useUpdateDevice();
+  const deleteAccountMutation = useDeleteAccount();
+  
+  // Handle auth errors
+  useEffect(() => {
+    if (userError) {
+      const err = userError as any;
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
+        console.error('Authentication error in settings - logging out');
+        resetDiscoverySession();
+        setCurrentUserId(null);
+      }
+    }
+  }, [userError, setCurrentUserId]);
   
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   
   // Permissions
   const [locationEnabled, setLocationEnabled] = useState(false);
@@ -65,25 +88,13 @@ export default function UltraEnhancedSettingsScreen() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Filters Modal
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+
+  // Load user data from React Query
   useEffect(() => {
-    loadSettings();
-    loadOptions();
-    checkPermissions();
-  }, []);
-
-  async function loadOptions() {
-    try {
-      const res = await api.get('/onboarding/options');
-      setOptions(res.data);
-    } catch (err) {
-      console.error('Failed to load options', err);
-    }
-  }
-
-  async function loadSettings() {
-    try {
-      const res = await api.get('/users/me');
-      const user = res.data;
+    if (userData) {
+      const user = userData;
       const prefs = user.preferences;
       
       // User settings
@@ -110,14 +121,19 @@ export default function UltraEnhancedSettingsScreen() {
           setSelectedRelocate(prefs.relocate_preference ? 'yes' : 'no');
         }
       }
-      
-      setLoading(false);
-    } catch (err) {
-      console.error('Failed to load settings:', err);
-      setError('فشل تحميل الإعدادات');
-      setLoading(false);
     }
-  }
+  }, [userData]);
+
+  // Sync options from React Query
+  useEffect(() => {
+    if (optionsData) {
+      setOptions(optionsData);
+    }
+  }, [optionsData]);
+
+  useEffect(() => {
+    checkPermissions();
+  }, []);
 
   async function checkPermissions() {
     setCheckingPermissions(true);
@@ -155,13 +171,15 @@ export default function UltraEnhancedSettingsScreen() {
       if (permReq.status === 'granted') {
         setLocationEnabled(true);
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        await api.put('/users/me/device', { location: { lat: pos.coords.latitude, lng: pos.coords.longitude } });
+        
+        // Update device location
+        updateDeviceMutation.mutate({ location: { lat: pos.coords.latitude, lng: pos.coords.longitude } });
         
         try {
           const rg = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
           const first = rg?.[0];
           if (first) {
-            await api.put('/users/me', { 
+            updateProfileMutation.mutate({ 
               city: (first.city || first.subregion || first.region) as any,
               country: first.country as any 
             });
@@ -198,7 +216,7 @@ export default function UltraEnhancedSettingsScreen() {
         setNotificationsEnabled(true);
         try {
           const token = (await Notifications.getExpoPushTokenAsync()).data;
-          await api.put('/users/me/device', { expo_push_token: token });
+          updateDeviceMutation.mutate({ expo_push_token: token });
           setSuccess('✅ تم تفعيل الإشعارات');
           setTimeout(() => setSuccess(null), 3000);
         } catch (e) {
@@ -210,24 +228,12 @@ export default function UltraEnhancedSettingsScreen() {
     }
   }
 
-  // Auto-save preferences whenever they change
+  // Auto-save preferences whenever they change using React Query mutation
   useEffect(() => {
-    if (loading) return; // Don't save during initial load
+    if (userLoading || !userData) return; // Don't save during initial load
     
     const timer = setTimeout(() => {
-      savePreferences();
-    }, 500); // Debounce 500ms
-    
-    return () => clearTimeout(timer);
-  }, [
-    ageMin, ageMax, distanceKm, heightMin, heightMax,
-    selectedSects, selectedEducation, selectedMaritalStatus,
-    selectedSmoking, selectedChildren, selectedRelocate, selectedOrigins
-  ]);
-
-  async function savePreferences() {
-    try {
-      await api.put('/users/me/preferences', {
+      updatePreferencesMutation.mutate({
         age_min: ageMin,
         age_max: ageMax,
         distance_km: distanceKm,
@@ -241,11 +247,15 @@ export default function UltraEnhancedSettingsScreen() {
         origin_preferences: JSON.stringify(selectedOrigins),
         relocate_preference: selectedRelocate === null ? null : selectedRelocate === 'yes',
       });
-      console.log('✅ Preferences auto-saved');
-    } catch (err: any) {
-      console.error('Failed to auto-save preferences:', err);
-    }
-  }
+    }, 500); // Debounce 500ms
+    
+    return () => clearTimeout(timer);
+  }, [
+    ageMin, ageMax, distanceKm, heightMin, heightMax,
+    selectedSects, selectedEducation, selectedMaritalStatus,
+    selectedSmoking, selectedChildren, selectedRelocate, selectedOrigins,
+    userLoading, userData
+  ]);
 
   function toggleSelection(array: string[], setArray: (arr: string[]) => void, value: string) {
     if (array.includes(value)) {
@@ -264,7 +274,16 @@ export default function UltraEnhancedSettingsScreen() {
       'هل أنت متأكد من تسجيل الخروج؟',
       [
         { text: 'إلغاء', style: 'cancel' },
-        { text: 'تسجيل الخروج', style: 'destructive', onPress: () => setCurrentUserId(null) },
+        { 
+          text: 'تسجيل الخروج', 
+          style: 'destructive', 
+          onPress: () => {
+            // Clear all caches on logout
+            resetDiscoverySession(); // Clear session excludes
+            queryClient.clear(); // Clear ALL React Query cache
+            setCurrentUserId(null); // Clear user ID (triggers navigation)
+          }
+        },
       ]
     );
   }
@@ -279,26 +298,41 @@ export default function UltraEnhancedSettingsScreen() {
     feedback.important();
     
     setIsDeleting(true);
-    try {
-      await api.delete('/users/me');
-      setShowDeleteModal(false);
-      Alert.alert(
-        'تم حذف الحساب',
-        'تم حذف حسابك وجميع بياناتك بنجاح',
-        [{ text: 'حسناً', onPress: () => setCurrentUserId(null) }]
-      );
-    } catch (err: any) {
-      feedback.error();
-      setError(err.response?.data?.message || 'فشل حذف الحساب');
-      setIsDeleting(false);
-    }
+    deleteAccountMutation.mutate(undefined, {
+      onSuccess: () => {
+        setShowDeleteModal(false);
+        Alert.alert(
+          'تم حذف الحساب',
+          'تم حذف حسابك وجميع بياناتك بنجاح',
+          [{ text: 'حسناً', onPress: () => {
+            resetDiscoverySession();
+            setCurrentUserId(null);
+          }}]
+        );
+      },
+      onError: (err: any) => {
+        feedback.error();
+        setError(err.response?.data?.message || 'فشل حذف الحساب');
+        setIsDeleting(false);
+      },
+    });
   }
 
-  if (loading) {
+  if (userLoading && !userData) {
     return (
       <GradientBackground>
         <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center' }]}>
           <Text style={styles.loading}>جاري التحميل...</Text>
+        </View>
+      </GradientBackground>
+    );
+  }
+  
+  if (!userData) {
+    return (
+      <GradientBackground>
+        <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center' }]}>
+          <Text style={styles.loading}>فشل تحميل البيانات</Text>
         </View>
       </GradientBackground>
     );
@@ -332,7 +366,10 @@ export default function UltraEnhancedSettingsScreen() {
                 </View>
               </View>
               <TouchableOpacity 
-                onPress={toggleLocation} 
+                onPress={() => {
+                  feedback.selection();
+                  toggleLocation();
+                }} 
                 style={[styles.toggleBtn, locationEnabled && styles.toggleBtnActive]}
                 disabled={checkingPermissions}
               >
@@ -357,7 +394,10 @@ export default function UltraEnhancedSettingsScreen() {
                 </View>
               </View>
               <TouchableOpacity 
-                onPress={toggleNotifications} 
+                onPress={() => {
+                  feedback.selection();
+                  toggleNotifications();
+                }} 
                 style={[styles.toggleBtn, notificationsEnabled && styles.toggleBtnActive]}
                 disabled={checkingPermissions}
               >
@@ -383,13 +423,16 @@ export default function UltraEnhancedSettingsScreen() {
               <View style={styles.rtlSwitchContainer}>
                 <Switch 
                   value={!userDiscoverable} 
-                  onValueChange={async (hidden) => {
-                    try {
-                      setUserDiscoverable(!hidden);
-                      await api.put('/users/me', { discoverable: !hidden });
-                    } catch (e) {
-                      setUserDiscoverable((prev) => !prev);
-                    }
+                  onValueChange={(hidden) => {
+                    setUserDiscoverable(!hidden);
+                    updateProfileMutation.mutate(
+                      { discoverable: !hidden },
+                      {
+                        onError: () => {
+                          setUserDiscoverable((prev) => !prev);
+                        },
+                      }
+                    );
                   }} 
                   trackColor={{ true: colors.accent, false: colors.border }} 
                   thumbColor="#fff"
@@ -400,323 +443,20 @@ export default function UltraEnhancedSettingsScreen() {
           </View>
         </View>
 
-        {/* Discovery Preferences */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>تفضيلات الاستكشاف</Text>
-          <Text style={styles.sectionHint}>التفضيلات تُحفظ تلقائياً</Text>
-
-          {/* Distance - Simple Slider */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="location" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>نطاق المسافة</Text>
-            </View>
-            <View style={styles.distanceControl}>
-              <Text style={styles.distanceValue}>{distanceKm} كم</Text>
-              <View style={styles.rtlSliderContainer}>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={5}
-                  maximumValue={500}
-                  step={5}
-                  value={distanceKm}
-                  onValueChange={setDistanceKm}
-                  minimumTrackTintColor={colors.accent}
-                  maximumTrackTintColor={colors.border}
-                  thumbTintColor={colors.accent}
-                />
-              </View>
-              <View style={styles.distanceLabels}>
-                <Text style={styles.distanceLabel}>5</Text>
-                <Text style={styles.distanceLabel}>100</Text>
-                <Text style={styles.distanceLabel}>500</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Age Range - Tinder Style */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="calendar" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>نطاق العمر</Text>
-            </View>
-            <View style={styles.rangeSelector}>
-              <View style={styles.rangeControl}>
-                <Text style={styles.rangeLabel}>من</Text>
-                <View style={styles.numberControl}>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setAgeMin(Math.max(18, ageMin - 1))}
-                  >
-                    <Ionicons name="remove" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={styles.rangeNumber}>{ageMin}</Text>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setAgeMin(Math.min(100, ageMin + 1))}
-                  >
-                    <Ionicons name="add" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              <View style={styles.rangeDivider} />
-              
-              <View style={styles.rangeControl}>
-                <Text style={styles.rangeLabel}>إلى</Text>
-                <View style={styles.numberControl}>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setAgeMax(Math.max(18, ageMax - 1))}
-                  >
-                    <Ionicons name="remove" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={styles.rangeNumber}>{ageMax}</Text>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setAgeMax(Math.min(100, ageMax + 1))}
-                  >
-                    <Ionicons name="add" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Height Range - Tinder Style */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="resize" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>نطاق الطول</Text>
-            </View>
-            <View style={styles.rangeSelector}>
-              <View style={styles.rangeControl}>
-                <Text style={styles.rangeLabel}>من</Text>
-                <View style={styles.numberControl}>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setHeightMin(Math.max(140, heightMin - 1))}
-                  >
-                    <Ionicons name="remove" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                  <View style={styles.heightDisplay}>
-                    <Text style={styles.rangeNumber}>{heightMin}</Text>
-                    <Text style={styles.unitText}>سم</Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setHeightMin(Math.min(210, heightMin + 1))}
-                  >
-                    <Ionicons name="add" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.imperialText}>{Math.round(heightMin / 2.54)}"</Text>
-              </View>
-              
-              <View style={styles.rangeDivider} />
-              
-              <View style={styles.rangeControl}>
-                <Text style={styles.rangeLabel}>إلى</Text>
-                <View style={styles.numberControl}>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setHeightMax(Math.max(140, heightMax - 1))}
-                  >
-                    <Ionicons name="remove" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                  <View style={styles.heightDisplay}>
-                    <Text style={styles.rangeNumber}>{heightMax}</Text>
-                    <Text style={styles.unitText}>سم</Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.controlBtn}
-                    onPress={() => setHeightMax(Math.min(210, heightMax + 1))}
-                  >
-                    <Ionicons name="add" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.imperialText}>{Math.round(heightMax / 2.54)}"</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Origin */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="flag" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>الأصل</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.originScrollContent}
-            >
-              {(options.arabic_origins || []).map((country: any) => (
-                <TouchableOpacity
-                  key={country.code}
-                  style={[styles.originChip, selectedOrigins.includes(country.name) && styles.originChipActive]}
-                  onPress={() => toggleSelection(selectedOrigins, setSelectedOrigins, country.name)}
-                >
-                  <Text style={[styles.originName, selectedOrigins.includes(country.name) && styles.originNameActive]}>
-                    {country.name} {country.flag}
-                  </Text>
-                  {selectedOrigins.includes(country.name) && (
-                    <View style={styles.originCheckmark}>
-                      <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Sect */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="moon" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>المذهب</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <View style={styles.chipsContainer}>
-              {(options.sects || []).map((sect: string) => (
-                <TouchableOpacity
-                  key={sect}
-                  style={[styles.filterChip, selectedSects.includes(sect) && styles.filterChipActive]}
-                  onPress={() => toggleSelection(selectedSects, setSelectedSects, sect)}
-                >
-                  <Text style={[styles.filterChipText, selectedSects.includes(sect) && styles.filterChipTextActive]}>
-                    {sect}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Education */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="school" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>التعليم</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <View style={styles.chipsContainer}>
-              {(options.education_levels || []).map((level: string) => (
-                <TouchableOpacity
-                  key={level}
-                  style={[styles.filterChip, selectedEducation.includes(level) && styles.filterChipActive]}
-                  onPress={() => toggleSelection(selectedEducation, setSelectedEducation, level)}
-                >
-                  <Text style={[styles.filterChipText, selectedEducation.includes(level) && styles.filterChipTextActive]}>
-                    {level}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Marital Status */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="heart" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>الحالة الاجتماعية</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <View style={styles.chipsContainer}>
-              {(options.marital_status_options || []).map((status: string) => (
-                <TouchableOpacity
-                  key={status}
-                  style={[styles.filterChip, selectedMaritalStatus.includes(status) && styles.filterChipActive]}
-                  onPress={() => toggleSelection(selectedMaritalStatus, setSelectedMaritalStatus, status)}
-                >
-                  <Text style={[styles.filterChipText, selectedMaritalStatus.includes(status) && styles.filterChipTextActive]}>
-                    {status}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Smoking */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="ban" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>التدخين</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <View style={styles.chipsContainer}>
-              {(options.smoking_options || []).map((option: string) => (
-                <TouchableOpacity
-                  key={option}
-                  style={[styles.filterChip, selectedSmoking.includes(option) && styles.filterChipActive]}
-                  onPress={() => toggleSelection(selectedSmoking, setSelectedSmoking, option)}
-                >
-                  <Text style={[styles.filterChipText, selectedSmoking.includes(option) && styles.filterChipTextActive]}>
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Children */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="people" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>رغبة الأطفال</Text>
-            </View>
-            <Text style={styles.filterHint}>فارغ = الكل</Text>
-            <View style={styles.chipsContainer}>
-              {(options.children_preferences || []).map((pref: string) => (
-                <TouchableOpacity
-                  key={pref}
-                  style={[styles.filterChip, selectedChildren.includes(pref) && styles.filterChipActive]}
-                  onPress={() => toggleSelection(selectedChildren, setSelectedChildren, pref)}
-                >
-                  <Text style={[styles.filterChipText, selectedChildren.includes(pref) && styles.filterChipTextActive]}>
-                    {pref}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Relocation */}
-          <View style={styles.filterCard}>
-            <View style={styles.filterHeader}>
-              <Ionicons name="airplane" size={20} color={colors.accent} />
-              <Text style={styles.filterTitle}>الاستعداد للانتقال</Text>
-            </View>
-            <Text style={styles.filterHint}>اختر واحد</Text>
-            <View style={styles.chipsContainer}>
-              <TouchableOpacity
-                style={[styles.filterChip, selectedRelocate === null && styles.filterChipActive]}
-                onPress={() => setSelectedRelocate(null)}
-              >
-                <Text style={[styles.filterChipText, selectedRelocate === null && styles.filterChipTextActive]}>
-                  لا يهم
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterChip, selectedRelocate === 'yes' && styles.filterChipActive]}
-                onPress={() => setSelectedRelocate('yes')}
-              >
-                <Text style={[styles.filterChipText, selectedRelocate === 'yes' && styles.filterChipTextActive]}>
-                  نعم
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterChip, selectedRelocate === 'no' && styles.filterChipActive]}
-                onPress={() => setSelectedRelocate('no')}
-              >
-                <Text style={[styles.filterChipText, selectedRelocate === 'no' && styles.filterChipTextActive]}>
-                  لا
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-        </View>
+         {/* فلاتر البحث - زر يفتح المودال */}
+         <View style={styles.section}>
+           <Text style={styles.sectionTitle}>فلاتر البحث</Text>
+           <Text style={styles.sectionHint}>اضبط معايير البحث للتوافقات</Text>
+           <TouchableOpacity 
+             style={styles.filterOpenBtn}
+             onPress={() => { feedback.buttonPress(); setShowFiltersModal(true); }}
+             activeOpacity={0.85}
+           >
+             <Ionicons name="funnel" size={22} color={colors.accent} />
+             <Text style={styles.filterOpenText}>فتح فلاتر البحث</Text>
+             <Ionicons name="chevron-back" size={18} color={colors.subtext} />
+           </TouchableOpacity>
+         </View>
 
         {/* Account Actions */}
         <View style={styles.accountSection}>
@@ -724,7 +464,10 @@ export default function UltraEnhancedSettingsScreen() {
           
           <TouchableOpacity 
             style={styles.logoutCard}
-            onPress={handleLogout}
+            onPress={() => {
+              feedback.important();
+              handleLogout();
+            }}
           >
             <Ionicons name="log-out-outline" size={24} color="#f59e0b" />
             <Text style={styles.logoutText}>تسجيل الخروج</Text>
@@ -733,7 +476,10 @@ export default function UltraEnhancedSettingsScreen() {
 
           <TouchableOpacity 
             style={styles.deleteCard}
-            onPress={() => setShowDeleteModal(true)}
+            onPress={() => {
+              feedback.important();
+              setShowDeleteModal(true);
+            }}
           >
             <Ionicons name="trash" size={24} color="#ef4444" />
             <Text style={styles.deleteText}>حذف الحساب نهائياً</Text>
@@ -785,7 +531,10 @@ export default function UltraEnhancedSettingsScreen() {
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={[styles.modalBtn, styles.deleteBtn, deleteConfirmText.toLowerCase() !== 'delete' && styles.deleteBtnDisabled]}
-                  onPress={handleDeleteAccount}
+                  onPress={() => {
+                    feedback.important();
+                    handleDeleteAccount();
+                  }}
                   disabled={deleteConfirmText.toLowerCase() !== 'delete' || isDeleting}
                 >
                   <Ionicons name="trash" size={20} color="#fff" />
@@ -796,7 +545,10 @@ export default function UltraEnhancedSettingsScreen() {
 
                 <TouchableOpacity
                   style={[styles.modalBtn, styles.cancelBtn]}
-                  onPress={() => setShowDeleteModal(false)}
+                  onPress={() => {
+                    feedback.buttonPress();
+                    setShowDeleteModal(false);
+                  }}
                   disabled={isDeleting}
                 >
                   <Text style={styles.cancelBtnText}>إلغاء</Text>
@@ -806,6 +558,7 @@ export default function UltraEnhancedSettingsScreen() {
           </View>
         </Modal>
       </ScrollView>
+      <SearchFiltersModal visible={showFiltersModal} onClose={() => setShowFiltersModal(false)} />
     </GradientBackground>
   );
 }
@@ -848,6 +601,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: spacing(2),
     textAlign: 'right',
+  },
+  filterOpenBtn: {
+    backgroundColor: colors.card,
+    borderRadius: radii.lg,
+    paddingVertical: spacing(1.5),
+    paddingHorizontal: spacing(2),
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shadows.soft,
+  },
+  filterOpenText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // Permission Cards
