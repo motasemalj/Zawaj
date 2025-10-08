@@ -441,11 +441,14 @@ export default function EnhancedDiscoveryScreen() {
     // Reset local deck immediately for snappy UX
     setCurrentIndex(0);
     setDeck([]);
+    setPage(0);
     // Clear session excludes and trigger a single refetch via the hook's internal versioning
     clearSessionExcludes();
+    // Force immediate refetch to get filtered results
+    refetchDiscovery();
     // Release suppression shortly after to allow future auto-resets
     setTimeout(() => { filtersResetInProgressRef.current = false; }, 500);
-  }, [clearSessionExcludes]);
+  }, [clearSessionExcludes, setPage, refetchDiscovery]);
 
   // Listen to preferences changes (from Settings screens) and reset discovery accordingly
   const { data: meQueryData } = useCurrentUser({ staleTime: 0 });

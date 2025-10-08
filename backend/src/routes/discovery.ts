@@ -44,11 +44,21 @@ router.get('/', async (req: AuthedRequest, res, next) => {
     let roleCondition: any;
     
     if (myRole === 'male') {
-      // Male can only see females
-      roleCondition = { role: 'female' };
+      // Male can see females OR mothers looking for daughter
+      roleCondition = { 
+        OR: [
+          { role: 'female' },
+          { AND: [{ role: 'mother' }, { mother_for: 'daughter' }] }
+        ]
+      };
     } else if (myRole === 'female') {
-      // Female can only see males
-      roleCondition = { role: 'male' };
+      // Female can see males OR mothers looking for son
+      roleCondition = { 
+        OR: [
+          { role: 'male' },
+          { AND: [{ role: 'mother' }, { mother_for: 'son' }] }
+        ]
+      };
     } else if (myRole === 'mother' && myMotherFor === 'son') {
       // Mother looking for son can see: females OR mothers looking for daughter
       roleCondition = { 
@@ -103,18 +113,20 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       andConditions.push({ mother_for: { in: mothersFor as any } });
     }
 
-    // Age filters
+    // Age filters - mothers are treated as normal users, no ward logic
     if (prefs?.age_min || prefs?.age_max) {
       const today = new Date();
-      if (prefs.age_min) {
-        // age_min: 24 means find users 24+ years old (born 24+ years ago)
-        const maxDob = new Date(today); maxDob.setFullYear(today.getFullYear() - (prefs.age_min as number));
-        andConditions.push({ dob: { lte: maxDob } });
-      }
+      
       if (prefs.age_max) {
-        // age_max: 40 means find users 40 or younger (born 40 or fewer years ago)
-        const minDob = new Date(today); minDob.setFullYear(today.getFullYear() - (prefs.age_max as number));
+        const minDob = new Date(today);
+        minDob.setFullYear(today.getFullYear() - (prefs.age_max as number));
         andConditions.push({ dob: { gte: minDob } });
+      }
+      
+      if (prefs.age_min) {
+        const maxDob = new Date(today);
+        maxDob.setFullYear(today.getFullYear() - (prefs.age_min as number));
+        andConditions.push({ dob: { lte: maxDob } });
       }
     }
 
@@ -136,6 +148,7 @@ router.get('/', async (req: AuthedRequest, res, next) => {
     try { prefSmoking = prefs?.smoking_preferences ? JSON.parse(prefs.smoking_preferences) : null; } catch { prefSmoking = null; }
     try { prefChildren = prefs?.children_preferences ? JSON.parse(prefs.children_preferences) : null; } catch { prefChildren = null; }
 
+    // Attribute filters - apply to all users including mothers (no special handling)
     if (prefHeightMin !== null) andConditions.push({ height_cm: { gte: prefHeightMin } });
     if (prefHeightMax !== null) andConditions.push({ height_cm: { lte: prefHeightMax } });
 
@@ -211,6 +224,8 @@ router.get('/', async (req: AuthedRequest, res, next) => {
     ];
     andConditions.push({ id: { notIn: allExcludeIds } });
     console.log(`Excluded in WHERE: ${allExcludeIds.length} (${excludeIds.size} blocked, ${excludeSwipedIds.length} swiped, ${sessionExcludeIds.length} session, ${excludeSeenIds.length} seen)`);
+    console.log(`Role condition:`, JSON.stringify(roleCondition, null, 2));
+    console.log(`Total AND conditions: ${andConditions.length}`);
 
     // Location is optional - only apply distance filtering if user has location
     const meHasLocation = !!me.location;
@@ -226,6 +241,10 @@ router.get('/', async (req: AuthedRequest, res, next) => {
         { created_at: 'desc' },
       ],
     });
+    console.log(`Found ${users.length} users after DB query`);
+    if (users.length > 0) {
+      console.log(`Sample user roles: ${users.slice(0, 10).map(u => `${u.role}${u.role === 'mother' ? `(${(u as any).mother_for})` : ''}`).join(', ')}`);
+    }
 
     // Strict mode: no relaxed fallback; use DB-filtered users as candidates
     const candidateUsers = users;
