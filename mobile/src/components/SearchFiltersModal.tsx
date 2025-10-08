@@ -14,7 +14,7 @@ type Props = {
   onFiltersChanged?: () => void;
 };
 
-export default function SearchFiltersModal({ visible, onClose }: Props) {
+export default function SearchFiltersModal({ visible, onClose, onFiltersChanged }: Props) {
   const insets = useSafeAreaInsets();
   
   // React Query hooks
@@ -106,6 +106,35 @@ export default function SearchFiltersModal({ visible, onClose }: Props) {
     return () => clearTimeout(timer);
   }, [ageMin, ageMax, distanceKm, heightMin, heightMax, selectedSects, selectedEducation, selectedMaritalStatus, selectedSmoking, selectedChildren, selectedRelocate, selectedOrigins, ageEnabled, heightEnabled, distanceEnabled, originEnabled, sectEnabled, educationEnabled, maritalEnabled, smokingEnabled, childrenEnabled, relocateEnabled, visible, userData]);
 
+  function buildPreferencesPayload() {
+    return {
+      age_min: ageEnabled ? ageMin : null,
+      age_max: ageEnabled ? ageMax : null,
+      distance_km: distanceEnabled ? distanceKm : null,
+      height_min_cm: heightEnabled ? heightMin : null,
+      height_max_cm: heightEnabled ? heightMax : null,
+      sect_preferences: sectEnabled ? JSON.stringify(selectedSects) : JSON.stringify([]),
+      education_preferences: educationEnabled ? JSON.stringify(selectedEducation) : JSON.stringify([]),
+      marital_status_preferences: maritalEnabled ? JSON.stringify(selectedMaritalStatus) : JSON.stringify([]),
+      smoking_preferences: smokingEnabled ? JSON.stringify(selectedSmoking) : JSON.stringify([]),
+      children_preferences: childrenEnabled ? JSON.stringify(selectedChildren) : JSON.stringify([]),
+      origin_preferences: originEnabled ? JSON.stringify(selectedOrigins) : JSON.stringify([]),
+      relocate_preference: relocateEnabled ? (selectedRelocate === null ? null : selectedRelocate === 'yes') : null,
+    } as const;
+  }
+
+  function applyAndClose() {
+    // Apply immediately to avoid debounce race, then notify parent and close
+    updatePreferencesMutation.mutate(buildPreferencesPayload(), {
+      onSuccess: () => {
+        onFiltersChanged?.();
+      },
+      onSettled: () => {
+        onClose();
+      },
+    });
+  }
+
   function toggleSelection(array: string[], setArray: (arr: string[]) => void, value: string) {
     if (array.includes(value)) setArray(array.filter(v => v !== value)); else setArray([...array, value]);
   }
@@ -114,7 +143,7 @@ export default function SearchFiltersModal({ visible, onClose }: Props) {
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={[styles.container, { paddingTop: insets.top + spacing(1), paddingBottom: Math.max(insets.bottom, spacing(2)) }]}> 
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => { feedback.buttonPress(); onClose(); }} style={styles.closeBtn}>
+          <TouchableOpacity onPress={() => { feedback.buttonPress(); applyAndClose(); }} style={styles.closeBtn}>
             <Ionicons name="chevron-down" size={28} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.title}>فلاتر البحث</Text>

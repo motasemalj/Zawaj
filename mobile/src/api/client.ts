@@ -9,7 +9,7 @@ type ApiState = {
 };
 
 export const useApiState = create<ApiState>((set) => ({
-  baseUrl: 'http://192.168.1.22:4000',
+  baseUrl: 'http://172.31.33.182:4000',
   setBaseUrl: (url) => set({ baseUrl: url }),
   currentUserId: null,
   setCurrentUserId: (id) => set({ currentUserId: id }),

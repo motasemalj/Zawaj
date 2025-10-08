@@ -173,7 +173,13 @@ export default function UltraEnhancedSettingsScreen() {
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         
         // Update device location
-        updateDeviceMutation.mutate({ location: { lat: pos.coords.latitude, lng: pos.coords.longitude } });
+        updateDeviceMutation.mutate({ location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }, {
+          onSuccess: () => {
+            // Reflect immediately in discovery
+            resetDiscoverySession();
+            queryClient.invalidateQueries({ queryKey: ['discovery'] });
+          }
+        });
         
         try {
           const rg = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
@@ -246,6 +252,12 @@ export default function UltraEnhancedSettingsScreen() {
         children_preferences: JSON.stringify(selectedChildren),
         origin_preferences: JSON.stringify(selectedOrigins),
         relocate_preference: selectedRelocate === null ? null : selectedRelocate === 'yes',
+      }, {
+        onSuccess: () => {
+          // Make discovery snappier: clear session excludes and invalidate discovery immediately
+          resetDiscoverySession();
+          queryClient.invalidateQueries({ queryKey: ['discovery'] });
+        },
       });
     }, 500); // Debounce 500ms
     
@@ -428,6 +440,10 @@ export default function UltraEnhancedSettingsScreen() {
                     updateProfileMutation.mutate(
                       { discoverable: !hidden },
                       {
+                        onSuccess: () => {
+                          resetDiscoverySession();
+                          queryClient.invalidateQueries({ queryKey: ['discovery'] });
+                        },
                         onError: () => {
                           setUserDiscoverable((prev) => !prev);
                         },

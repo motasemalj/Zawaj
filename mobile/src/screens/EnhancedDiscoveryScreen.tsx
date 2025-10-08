@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { getClient, User, useApiState } from '../api/client';
+import { useCurrentUser } from '../api/hooks';
 import { colors, radii, shadows, spacing } from '../theme';
 import GradientBackground from '../components/ui/GradientBackground';
 import Avatar from '../components/ui/Avatar';
@@ -35,7 +36,7 @@ export default function EnhancedDiscoveryScreen() {
     markAsShown,
     clearSessionExcludes,
     setPage,
-  } = useDiscoveryProfiles();
+  } = useDiscoveryProfiles({ enabled: !!currentUserId });
   
   const swipeMutation = useSwipe();
   const undoSwipeMutation = useUndoSwipe();
@@ -61,6 +62,7 @@ export default function EnhancedDiscoveryScreen() {
   const [lastSwipedProfile, setLastSwipedProfile] = useState<(User & { is_super_liker?: boolean }) | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const filtersResetInProgressRef = useRef(false);
   
   // Local append-only deck to prevent flicker when query refetches
   type DiscoveryUser = User & { is_super_liker?: boolean };
@@ -83,20 +85,8 @@ export default function EnhancedDiscoveryScreen() {
   // Loading only blocks when deck is empty
   const loading = discoveryLoading && deck.length === 0;
   
-  // Mark current profile as shown
+  // Current profile (no marking on view; marking happens on swipe only)
   const currentProfile = deck[currentIndex] || null;
-  const seenMarkedRef = useRef<Set<string>>(new Set());
-  React.useEffect(() => {
-    if (currentProfile) {
-      // Mark in-session to avoid local duplicates (idempotent)
-      markAsShown(currentProfile.id);
-      // Mark server-side only once per id to avoid duplicate calls
-      if (!seenMarkedRef.current.has(currentProfile.id)) {
-        seenMarkedRef.current.add(currentProfile.id);
-        markSeenMutation.mutate(currentProfile.id);
-      }
-    }
-  }, [currentProfile?.id, markAsShown, markSeenMutation]);
   
   // Handle discovery errors
   React.useEffect(() => {
@@ -163,6 +153,12 @@ export default function EnhancedDiscoveryScreen() {
           const lat = pos.coords.latitude; 
           const lng = pos.coords.longitude;
           await api.put('/users/me/device', { location: { lat, lng } }).catch(()=>{});
+          // Reset discovery to ensure distance filter is applied to the current deck
+          setCurrentIndex(0);
+          setDeck([]);
+          setPage(0);
+          clearSessionExcludes();
+          refetchDiscovery();
           try {
             const rg = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
             const first = rg?.[0];
@@ -211,6 +207,12 @@ export default function EnhancedDiscoveryScreen() {
               const lat = pos.coords.latitude; 
               const lng = pos.coords.longitude;
               await api.put('/users/me/device', { location: { lat, lng } }).catch(()=>{});
+              // Reset discovery after location refresh on resume as well
+              setCurrentIndex(0);
+              setDeck([]);
+              setPage(0);
+              clearSessionExcludes();
+              refetchDiscovery();
               try {
                 const rg = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
                 const first = rg?.[0];
@@ -433,6 +435,44 @@ export default function EnhancedDiscoveryScreen() {
     return () => clearInterval(interval);
   }, [deck.length, appState, refetchDiscovery]);
 
+  // Apply filters change: reset deck and refetch cleanly
+  const handleFiltersChanged = React.useCallback(() => {
+    filtersResetInProgressRef.current = true;
+    // Reset local deck immediately for snappy UX
+    setCurrentIndex(0);
+    setDeck([]);
+    // Clear session excludes and trigger a single refetch via the hook's internal versioning
+    clearSessionExcludes();
+    // Release suppression shortly after to allow future auto-resets
+    setTimeout(() => { filtersResetInProgressRef.current = false; }, 500);
+  }, [clearSessionExcludes]);
+
+  // Listen to preferences changes (from Settings screens) and reset discovery accordingly
+  const { data: meQueryData } = useCurrentUser({ staleTime: 0 });
+  const lastPrefsHashRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prefs = meQueryData?.preferences || null;
+    const nextHash = prefs ? JSON.stringify(prefs) : 'none';
+    if (lastPrefsHashRef.current === null) {
+      lastPrefsHashRef.current = nextHash;
+      return;
+    }
+    if (nextHash !== lastPrefsHashRef.current) {
+      lastPrefsHashRef.current = nextHash;
+      if (!showFiltersModal && !filtersResetInProgressRef.current) {
+        // Only auto-reset when changes originate outside the modal
+        handleFiltersChanged();
+      }
+    }
+  }, [meQueryData?.preferences, showFiltersModal, handleFiltersChanged]);
+
+  // Reset discovery cleanly on login (when currentUserId becomes available)
+  useEffect(() => {
+    if (currentUserId) {
+      handleFiltersChanged();
+    }
+  }, [currentUserId, handleFiltersChanged]);
+
   // Handle swipe action
   const handleSwipe = useCallback((direction: 'left' | 'right' | 'up', isSuperLike = false) => {
     // Guard against invalid state
@@ -551,6 +591,13 @@ export default function EnhancedDiscoveryScreen() {
       position.setValue({ x: 0, y: 0 });
       cardOpacity.setValue(1);
       isSwipingRef.current = false;
+      // Mark profile as seen and session-excluded on swipe completion only
+      try {
+        if (profile?.id) {
+          markAsShown(profile.id);
+          markSeenMutation.mutate(profile.id);
+        }
+      } catch {}
       setCurrentIndex(prev => prev + 1);
       console.log('=== SWIPE END ===\n');
     };
@@ -790,6 +837,17 @@ export default function EnhancedDiscoveryScreen() {
       <GradientBackground>
         <SafeAreaView style={styles.wrapper} edges={['top', 'left', 'right']}>
           <View style={styles.container}>
+            {/* Keep header with Filters button even when no profiles */}
+            <View style={styles.headerRow}>
+              <Text style={styles.header}>استكشاف</Text>
+              <TouchableOpacity 
+                style={styles.filterButton}
+                onPress={() => { feedback.buttonPress(); setShowFiltersModal(true); }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="funnel" size={22} color={colors.accent} />
+              </TouchableOpacity>
+            </View>
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}>
                 <Ionicons 
@@ -828,6 +886,14 @@ export default function EnhancedDiscoveryScreen() {
               )}
             </View>
           </View>
+          {/* Filters Modal rendered even in empty state */}
+          <SearchFiltersModal 
+            visible={showFiltersModal} 
+            onFiltersChanged={handleFiltersChanged}
+            onClose={() => {
+              setShowFiltersModal(false);
+            }} 
+          />
         </SafeAreaView>
       </GradientBackground>
     );
@@ -892,11 +958,6 @@ export default function EnhancedDiscoveryScreen() {
                       onLoadEnd={() => setIsNextImageLoading(false)}
                       onError={() => setIsNextImageLoading(false)}
                     />
-                    {isNextImageLoading && (
-                      <View style={styles.imageLoaderOverlay} pointerEvents="none">
-                        <ActivityIndicator size="large" color={colors.accent} />
-                      </View>
-                    )}
                   </View>
                 ) : (
                   <View style={styles.cardImage}>
@@ -985,11 +1046,7 @@ export default function EnhancedDiscoveryScreen() {
                     )}
                     </ImageBackground>
                   </TouchableOpacity>
-                  {isCurrentImageLoading && (
-                    <View style={styles.imageLoaderOverlay} pointerEvents="none">
-                      <ActivityIndicator size="large" color={colors.accent} />
-                    </View>
-                  )}
+                  {/* Image loading indicator moved below the card */}
                 </View>
               ) : (
                 <View style={styles.cardImage}>
@@ -1105,6 +1162,13 @@ export default function EnhancedDiscoveryScreen() {
             ) : null}
           </View>
 
+          {/* Loading indicator below the card */}
+          {isCurrentImageLoading && (
+            <View style={{ alignItems: 'center', marginTop: spacing(1) }}>
+              <ActivityIndicator size="small" color={colors.accent} />
+            </View>
+          )}
+
           {/* Action Buttons */}
           {currentProfile && (
             <View style={styles.controlRing}>
@@ -1194,15 +1258,9 @@ export default function EnhancedDiscoveryScreen() {
         />
         <SearchFiltersModal 
           visible={showFiltersModal} 
+          onFiltersChanged={handleFiltersChanged}
           onClose={() => {
             setShowFiltersModal(false);
-            // New filters should replace deck - clear and refetch
-            setCurrentIndex(0);
-            setDeck([]);
-            setPage(0); // Reset page to 0
-            clearSessionExcludes();
-            // Ensure a fresh fetch immediately
-            refetchDiscovery();
           }} 
         />
       </SafeAreaView>

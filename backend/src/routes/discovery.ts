@@ -118,6 +118,40 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       }
     }
 
+    // Strict attribute filters (AND semantics in DB)
+    const prefHeightMin = prefs?.height_min_cm ?? null;
+    const prefHeightMax = prefs?.height_max_cm ?? null;
+    let prefOrigins: string[] | null = null;
+    let prefSects: string[] | null = null;
+    let prefEducation: string[] | null = null;
+    let prefMaritalStatus: string[] | null = null;
+    let prefSmoking: string[] | null = null;
+    let prefChildren: string[] | null = null;
+    const prefRelocate = prefs?.relocate_preference;
+
+    try { prefOrigins = prefs?.origin_preferences ? JSON.parse(prefs.origin_preferences) : null; } catch { prefOrigins = null; }
+    try { prefSects = prefs?.sect_preferences ? JSON.parse(prefs.sect_preferences) : null; } catch { prefSects = null; }
+    try { prefEducation = prefs?.education_preferences ? JSON.parse(prefs.education_preferences) : null; } catch { prefEducation = null; }
+    try { prefMaritalStatus = prefs?.marital_status_preferences ? JSON.parse(prefs.marital_status_preferences) : null; } catch { prefMaritalStatus = null; }
+    try { prefSmoking = prefs?.smoking_preferences ? JSON.parse(prefs.smoking_preferences) : null; } catch { prefSmoking = null; }
+    try { prefChildren = prefs?.children_preferences ? JSON.parse(prefs.children_preferences) : null; } catch { prefChildren = null; }
+
+    if (prefHeightMin !== null) andConditions.push({ height_cm: { gte: prefHeightMin } });
+    if (prefHeightMax !== null) andConditions.push({ height_cm: { lte: prefHeightMax } });
+
+    if (prefSects && prefSects.length > 0) andConditions.push({ sect: { in: prefSects as any } });
+    if (prefEducation && prefEducation.length > 0) andConditions.push({ education: { in: prefEducation as any } });
+    if (prefMaritalStatus && prefMaritalStatus.length > 0) andConditions.push({ marital_status: { in: prefMaritalStatus as any } });
+    if (prefSmoking && prefSmoking.length > 0) andConditions.push({ smoker: { in: prefSmoking as any } });
+    if (prefChildren && prefChildren.length > 0) andConditions.push({ children_preference: { in: prefChildren as any } });
+    if (prefRelocate !== null && prefRelocate !== undefined) andConditions.push({ relocate: { equals: prefRelocate } });
+
+    if (prefOrigins && prefOrigins.length > 0) {
+      // SQLite doesn't have JSON ops here; use contains checks on string column
+      const originOr: any[] = prefOrigins.map((o) => ({ ethnicity: { contains: o } }));
+      andConditions.push({ OR: originOr });
+    }
+
     // Exclude blocked users
     const blocks = await prisma.block.findMany({ where: { OR: [ { blocker_id: me.id }, { blocked_id: me.id } ] } });
     const excludeIds = new Set<string>();
@@ -160,14 +194,12 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       }
     }
 
-    // Exclude recently seen users in WHERE to strongly prevent immediate reappearance
-    const EXCLUDE_SEEN_HOURS = 24;
-    const since = new Date(Date.now() - EXCLUDE_SEEN_HOURS * 60 * 60 * 1000);
-    const recentlySeen = await prisma.discoverySeen.findMany({
-      where: { viewer_id: me.id, created_at: { gte: since } },
+    // Exclude ALL previously seen users (permanent exclusion)
+    const allSeen = await prisma.discoverySeen.findMany({
+      where: { viewer_id: me.id },
       select: { seen_user_id: true },
     });
-    const excludeRecentlySeenIds = recentlySeen.map((r) => r.seen_user_id);
+    const excludeSeenIds = allSeen.map((r) => r.seen_user_id);
 
     // Combine all exclusions for DB WHERE: blocked, swiped, session-shown, and recently-seen (24h)
     const allExcludeIds = [
@@ -175,14 +207,15 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       ...Array.from(excludeIds),
       ...excludeSwipedIds,
       ...sessionExcludeIds,
-      ...excludeRecentlySeenIds,
+      ...excludeSeenIds,
     ];
     andConditions.push({ id: { notIn: allExcludeIds } });
-    console.log(`Excluded in WHERE: ${allExcludeIds.length} (${excludeIds.size} blocked, ${excludeSwipedIds.length} swiped, ${sessionExcludeIds.length} session, ${excludeRecentlySeenIds.length} seen<${EXCLUDE_SEEN_HOURS}h)`);
+    console.log(`Excluded in WHERE: ${allExcludeIds.length} (${excludeIds.size} blocked, ${excludeSwipedIds.length} swiped, ${sessionExcludeIds.length} session, ${excludeSeenIds.length} seen)`);
 
     // Location is optional - only apply distance filtering if user has location
     const meHasLocation = !!me.location;
-    const distanceKm = prefs?.distance_km ?? 100; // default wider to avoid empty results
+    // Critically, only apply distance filter if the user explicitly set it in preferences
+    const distanceKm = typeof prefs?.distance_km === 'number' ? (prefs!.distance_km as number) : null;
 
     const users = await prisma.user.findMany({
       where: whereBase,
@@ -194,27 +227,8 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       ],
     });
 
-    // If empty, relax filters slightly to avoid empty decks for new users
-    let candidateUsers = users;
-    if (candidateUsers.length === 0) {
-      const relaxed = await prisma.user.findMany({
-        where: {
-          id: { not: me.id },
-          OR: [
-            { muslim_affirmed: true },
-            { onboarding_completed: true }
-          ],
-          role: { in: roles as any },
-        },
-        include: { photos: true },
-        take: 50,
-        orderBy: [
-          { updated_at: 'desc' },
-          { created_at: 'desc' },
-        ],
-      });
-      candidateUsers = relaxed;
-    }
+    // Strict mode: no relaxed fallback; use DB-filtered users as candidates
+    const candidateUsers = users;
 
     // Geo distance filter (rough haversine) and scoring
     function parseLoc(s?: string | null) {
@@ -222,98 +236,8 @@ router.get('/', async (req: AuthedRequest, res, next) => {
     }
     const meLoc = parseLoc(me.location);
 
-    // Parse all preference filters
-    const prefHeightMin = prefs?.height_min_cm ?? null;
-    const prefHeightMax = prefs?.height_max_cm ?? null;
-    let prefOrigins: string[] | null = null;
-    let prefSects: string[] | null = null;
-    let prefEducation: string[] | null = null;
-    let prefMaritalStatus: string[] | null = null;
-    let prefSmoking: string[] | null = null;
-    let prefChildren: string[] | null = null;
-    
-    try { prefOrigins = prefs?.origin_preferences ? JSON.parse(prefs.origin_preferences) : null; } catch { prefOrigins = null; }
-    try { prefSects = prefs?.sect_preferences ? JSON.parse(prefs.sect_preferences) : null; } catch { prefSects = null; }
-    try { prefEducation = prefs?.education_preferences ? JSON.parse(prefs.education_preferences) : null; } catch { prefEducation = null; }
-    try { prefMaritalStatus = prefs?.marital_status_preferences ? JSON.parse(prefs.marital_status_preferences) : null; } catch { prefMaritalStatus = null; }
-    try { prefSmoking = prefs?.smoking_preferences ? JSON.parse(prefs.smoking_preferences) : null; } catch { prefSmoking = null; }
-    try { prefChildren = prefs?.children_preferences ? JSON.parse(prefs.children_preferences) : null; } catch { prefChildren = null; }
-    
-    const prefRelocate = prefs?.relocate_preference;
-    
-    console.log(`Applying filters: height(${prefHeightMin}-${prefHeightMax}), origins(${prefOrigins?.length || 0}), sects(${prefSects?.length || 0}), education(${prefEducation?.length || 0}), marital(${prefMaritalStatus?.length || 0}), smoking(${prefSmoking?.length || 0}), children(${prefChildren?.length || 0}), relocate(${prefRelocate})`);
-
-    const filteredForAttrs = candidateUsers.filter(u => {
-      // Normalize and double-check eligibility in case of dirty data
-      const myRole = normalizeRole(me.role);
-      const targetRole = normalizeRole(u.role as any);
-      const myMotherFor = (me.mother_for || '').toLowerCase();
-      const targetMotherFor = ((u as any).mother_for || '').toLowerCase();
-      const roleEligible = (() => {
-        if (myRole === 'male') return targetRole === 'female';
-        if (myRole === 'female') return targetRole === 'male';
-        if (myRole === 'mother' && myMotherFor === 'son') return targetRole === 'female' || (targetRole === 'mother' && targetMotherFor === 'daughter');
-        if (myRole === 'mother' && myMotherFor === 'daughter') return targetRole === 'male' || (targetRole === 'mother' && targetMotherFor === 'son');
-        return false;
-      })();
-      if (!roleEligible) return false;
-      // Height clamp
-      if (prefHeightMin !== null && typeof u.height_cm === 'number' && u.height_cm < prefHeightMin) return false;
-      if (prefHeightMax !== null && typeof u.height_cm === 'number' && u.height_cm > prefHeightMax) return false;
-      
-      // Origins match: if preference list exists and non-empty, require intersection with user.ethnicity (JSON array or string)
-      if (prefOrigins && prefOrigins.length > 0) {
-        let userOrigins: string[] = [];
-        try {
-          if (u.ethnicity) {
-            const parsed = JSON.parse(u.ethnicity as any);
-            if (Array.isArray(parsed)) userOrigins = parsed;
-            else if (typeof u.ethnicity === 'string') userOrigins = [u.ethnicity as any];
-          }
-        } catch {
-          if (typeof u.ethnicity === 'string') userOrigins = [u.ethnicity as any];
-        }
-        if (!userOrigins.some(o => prefOrigins!.includes(o))) return false;
-      }
-      
-      // Sect filter
-      if (prefSects && prefSects.length > 0) {
-        if (!u.sect || !prefSects.includes(u.sect as string)) return false;
-      }
-      
-      // Education filter
-      if (prefEducation && prefEducation.length > 0) {
-        if (!u.education || !prefEducation.includes(u.education as string)) return false;
-      }
-      
-      // Marital status filter
-      if (prefMaritalStatus && prefMaritalStatus.length > 0) {
-        if (!u.marital_status || !prefMaritalStatus.includes(u.marital_status as string)) return false;
-      }
-      
-      // Smoking filter
-      if (prefSmoking && prefSmoking.length > 0) {
-        if (!u.smoker || !prefSmoking.includes(u.smoker as string)) return false;
-      }
-      
-      // Children preference filter
-      if (prefChildren && prefChildren.length > 0) {
-        if (!u.children_preference || !prefChildren.includes(u.children_preference as string)) return false;
-      }
-      
-      // Relocate filter (null = any, true = must be willing, false = must not be willing)
-      if (prefRelocate !== null && prefRelocate !== undefined) {
-        if (typeof u.relocate === 'boolean') {
-          if (prefRelocate !== u.relocate) return false;
-        } else {
-          // If user hasn't specified, skip this filter to avoid excluding too many
-        }
-      }
-      
-      return true;
-    });
-    
-    console.log(`After attribute filtering: ${filteredForAttrs.length} users (from ${candidateUsers.length} candidates)`);
+    const filteredForAttrs = candidateUsers;
+    console.log(`After DB attribute filtering: ${filteredForAttrs.length} users`);
 
     const usersWithScore = filteredForAttrs
       .map(u => {
@@ -330,8 +254,8 @@ router.get('/', async (req: AuthedRequest, res, next) => {
         return { ...u, _distance_km: distance } as any;
       })
       .filter(u => {
-        // Only apply distance filter if current user has location
-        if (!meHasLocation) return true;
+        // Only apply distance filter if current user has location AND distance preference is set
+        if (!meHasLocation || distanceKm === null) return true;
         return u._distance_km === Infinity ? true : u._distance_km <= distanceKm;
       })
       .map(u => {
