@@ -2,6 +2,8 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNav from './src/navigation';
+import { useAppStatePresence } from './src/services/firebase/init';
+import { useApiState } from './src/api/client';
 
 // NOTE: I18nManager.forceRTL() does NOT work reliably in Expo Go on iOS
 // Instead, we use explicit RTL styling in all components:
@@ -20,11 +22,19 @@ const client = new QueryClient({
   },
 });
 
+// AppContent with presence tracking
+function AppContent() {
+  const currentUserId = useApiState((state) => state.currentUserId);
+  useAppStatePresence(currentUserId);
+  
+  return <RootNav />;
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={client}>
-        <RootNav />
+        <AppContent />
       </QueryClientProvider>
     </SafeAreaProvider>
   );

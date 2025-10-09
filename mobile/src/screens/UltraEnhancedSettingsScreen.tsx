@@ -26,6 +26,7 @@ import { feedback } from '../utils/haptics';
 import SearchFiltersModal from '../components/SearchFiltersModal';
 import { useCurrentUser, useUpdateProfile, useUpdatePreferences, useUpdateDevice, useDeleteAccount, useOnboardingOptions, resetDiscoverySession } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { cleanupFirebaseForUser } from '../services/firebase/init';
 
 export default function UltraEnhancedSettingsScreen() {
   const api = getClient();
@@ -289,7 +290,21 @@ export default function UltraEnhancedSettingsScreen() {
         { 
           text: 'تسجيل الخروج', 
           style: 'destructive', 
-          onPress: () => {
+          onPress: async () => {
+            // Get current user ID before clearing it
+            const currentUserId = useApiState.getState().currentUserId;
+            
+            // Cleanup Firebase first
+            if (currentUserId) {
+              try {
+                await cleanupFirebaseForUser(currentUserId);
+                console.log('✅ Firebase cleaned up on logout');
+              } catch (error) {
+                console.error('❌ Firebase cleanup failed on logout:', error);
+                // Continue with logout even if Firebase cleanup fails
+              }
+            }
+            
             // Clear all caches on logout
             resetDiscoverySession(); // Clear session excludes
             queryClient.clear(); // Clear ALL React Query cache
@@ -477,7 +492,7 @@ export default function UltraEnhancedSettingsScreen() {
         {/* Account Actions */}
         <View style={styles.accountSection}>
           <Text style={styles.sectionTitle}>إدارة الحساب</Text>
-          
+          <View style={{ height: 20 }} />
           <TouchableOpacity 
             style={styles.logoutCard}
             onPress={() => {

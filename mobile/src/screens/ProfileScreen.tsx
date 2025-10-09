@@ -139,7 +139,12 @@ export default function ProfileScreen() {
       {/* Photos Management */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>الصور ({photos.length}/5)</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.photosScroll}
+          contentContainerStyle={styles.photosScrollContent}
+        >
           {photos.map((photo, idx) => (
             <View key={photo.id} style={styles.photoContainer}>
               <Image 
@@ -262,13 +267,40 @@ const styles = StyleSheet.create({
   previewName: { color: colors.text, fontSize: 24, fontWeight: '700', textAlign: 'right' },
   previewDetails: { color: colors.subtext, fontSize: 14, marginTop: spacing(0.5), textAlign: 'right' },
   previewBio: { color: colors.text, fontSize: 14, marginTop: spacing(1), textAlign: 'right' },
-  photosScroll: { flexDirection: 'row-reverse' },
-  photoContainer: { position: 'relative', marginLeft: spacing(1) },
+  photosScroll: { 
+    // RTL support for horizontal scrolling
+    transform: [{ scaleX: -1 }],
+  },
+  photosScrollContent: {
+    // Reverse the transform for content
+    transform: [{ scaleX: -1 }],
+    flexDirection: 'row-reverse',
+    paddingHorizontal: spacing(0.5),
+    justifyContent: 'flex-end', // Start from the right
+  },
+  photoContainer: { 
+    position: 'relative', 
+    marginRight: spacing(1),
+    // Ensure proper RTL display
+    transform: [{ scaleX: -1 }],
+  },
   photoThumb: { width: 100, height: 140, borderRadius: radii.md, backgroundColor: colors.surface },
   deletePhotoBtn: { position: 'absolute', top: 4, right: 4 },
   mainBadge: { position: 'absolute', bottom: 4, left: 4, backgroundColor: colors.accent, paddingHorizontal: spacing(1), paddingVertical: 2, borderRadius: radii.sm },
   mainBadgeText: { color: '#000', fontSize: 10, fontWeight: '700', textAlign: 'center' },
-  addPhotoBtn: { width: 100, height: 140, borderRadius: radii.md, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.border, borderStyle: 'dashed' },
+  addPhotoBtn: { 
+    width: 100, 
+    height: 140, 
+    borderRadius: radii.md, 
+    backgroundColor: colors.surface, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderWidth: 2, 
+    borderColor: colors.border, 
+    borderStyle: 'dashed',
+    // Ensure proper RTL display
+    transform: [{ scaleX: -1 }],
+  },
   input: { backgroundColor: colors.surface, color: colors.text, borderRadius: radii.md, height: 48, paddingHorizontal: spacing(2), marginBottom: spacing(1), textAlign: 'right' },
   inputArea: { backgroundColor: colors.surface, color: colors.text, borderRadius: radii.md, padding: spacing(2), marginBottom: spacing(1), textAlign: 'right', minHeight: 100 },
   editActions: { flexDirection: 'row-reverse', gap: spacing(1), marginTop: spacing(1) },

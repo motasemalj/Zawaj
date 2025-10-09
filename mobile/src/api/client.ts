@@ -9,7 +9,7 @@ type ApiState = {
 };
 
 export const useApiState = create<ApiState>((set) => ({
-  baseUrl: 'http://172.31.33.182:4000',
+  baseUrl: 'http://192.168.1.22:4000',
   setBaseUrl: (url) => set({ baseUrl: url }),
   currentUserId: null,
   setCurrentUserId: (id) => set({ currentUserId: id }),
@@ -62,6 +62,7 @@ export type Match = {
   user_b: User;
   created_at: string;
   last_message_at?: string | null;
+  last_message_text?: string | null;
 };
 
 export type Message = {

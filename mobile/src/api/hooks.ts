@@ -386,3 +386,15 @@ export function useUploadSinglePhoto(options?: UseMutationOptions<any, any, Form
   });
 }
 
+// Report user/message/photo
+export function useReport(options?: UseMutationOptions<any, any, any>) {
+  return useMutation({
+    mutationFn: async (data: { target_type: 'user' | 'message' | 'photo'; target_id: string; reason: string }) => {
+      const api = getClient();
+      const res = await api.post('/reports', data);
+      return res.data;
+    },
+    ...options,
+  });
+}
+

@@ -9,8 +9,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Alert,
 } from 'react-native';
-import { RouteProp, useRoute } from '@react-navigation/native';
+import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getClient, Match, Message, useApiState } from '../api/client';
 import { colors, radii, shadows, spacing } from '../theme';
@@ -18,11 +19,12 @@ import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../components/ui/Avatar';
 import GradientBackground from '../components/ui/GradientBackground';
 import { feedback } from '../utils/haptics';
-import MatchPreviewModal, { formatUserLocation } from '../components/MatchPreviewModal';
-import { useMatch, useMessages, useSendMessage } from '../api/hooks';
+import ProfileDetailModal from '../components/ProfileDetailModal';
+import { useMatch, useMessages, useSendMessage, useReport, useUnmatch } from '../api/hooks';
 
 export default function ChatScreen() {
   const route = useRoute<RouteProp<any>>();
+  const nav = useNavigation<any>();
   const matchId = (route.params as any)?.matchId as string;
   const currentUserId = useApiState((state) => state.currentUserId);
   const api = useMemo(() => getClient(), [currentUserId]);
@@ -32,6 +34,8 @@ export default function ChatScreen() {
   const { data: match } = useMatch(matchId);
   const { data: messagesData } = useMessages(matchId);
   const sendMessageMutation = useSendMessage();
+  const reportMutation = useReport();
+  const unmatchMutation = useUnmatch();
   
   const [text, setText] = useState('');
   const [guardian, setGuardian] = useState(false);
@@ -39,6 +43,15 @@ export default function ChatScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList<Message> | null>(null);
+
+  // Helper function for formatting user location
+  const formatUserLocation = (user: any) => {
+    if (!user) return '—';
+    const parts = [];
+    if (user.city) parts.push(user.city);
+    if (user.country) parts.push(user.country);
+    return parts.length > 0 ? parts.join(', ') : '—';
+  };
   
   const messages = messagesData || [];
 
@@ -76,6 +89,83 @@ export default function ChatScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
   }
+
+  const handleReport = () => {
+    if (!otherUser) return;
+    
+    Alert.alert(
+      'الإبلاغ عن المستخدم',
+      `هل تريد الإبلاغ عن ${otherUser.display_name}؟`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'الإبلاغ',
+          style: 'destructive',
+          onPress: () => {
+            Alert.prompt(
+              'سبب الإبلاغ',
+              'يرجى كتابة سبب الإبلاغ:',
+              [
+                { text: 'إلغاء', style: 'cancel' },
+                {
+                  text: 'إرسال',
+                  onPress: (reason: string | undefined) => {
+                    if (reason && reason.trim()) {
+                      reportMutation.mutate({
+                        target_type: 'user',
+                        target_id: otherUser.id,
+                        reason: reason.trim(),
+                      }, {
+                        onSuccess: () => {
+                          feedback.success();
+                          Alert.alert('تم الإبلاغ', 'تم إرسال البلاغ بنجاح');
+                        },
+                        onError: (error) => {
+                          feedback.error();
+                          Alert.alert('خطأ', 'فشل في إرسال البلاغ');
+                        },
+                      });
+                    }
+                  },
+                },
+              ],
+              'plain-text'
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const handleUnmatch = () => {
+    if (!otherUser || !matchId) return;
+    
+    Alert.alert(
+      'إلغاء التوافق',
+      `هل أنت متأكد من إلغاء التوافق مع ${otherUser.display_name}؟\n\nسيتم حذف جميع المحادثات نهائياً.`,
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'إلغاء التوافق',
+          style: 'destructive',
+          onPress: () => {
+            feedback.important();
+            unmatchMutation.mutate(matchId, {
+              onSuccess: () => {
+                feedback.success();
+                // Navigate back to matches screen
+                nav.goBack();
+              },
+              onError: (error: any) => {
+                feedback.error();
+                Alert.alert('خطأ', error.response?.data?.message || 'فشل في إلغاء التوافق');
+              },
+            });
+          },
+        },
+      ]
+    );
+  };
 
   // React Query handles polling automatically via refetchInterval
 
@@ -123,26 +213,72 @@ export default function ChatScreen() {
         >
           <View style={styles.flex}>
             {match && (
-              <TouchableOpacity style={styles.header} activeOpacity={0.85} onPress={() => {
-                feedback.buttonPress();
-                setCardVisible(true);
-              }}>
-                <Avatar
-                  uri={otherUser?.photos?.[0]?.url}
-                  label={otherUser?.display_name}
-                  size={56}
-                />
-                <View style={styles.headerText}>
-                  <Text style={styles.headerName}>{otherUser?.display_name ?? '—'}</Text>
-                  <Text style={styles.headerMeta} numberOfLines={1}>
-                    {formatUserLocation(otherUser)}
-                  </Text>
+              <View style={styles.header}>
+                <TouchableOpacity 
+                  style={styles.headerMain} 
+                  activeOpacity={0.85} 
+                  onPress={() => {
+                    feedback.buttonPress();
+                    setCardVisible(true);
+                  }}
+                >
+                  <View style={styles.avatarContainer}>
+                    <Avatar
+                      uri={otherUser?.photos?.[0]?.url}
+                      label={otherUser?.display_name}
+                      size={60}
+                    />
+                    {guardian && (
+                      <View style={styles.guardianIndicator}>
+                        <Ionicons name="shield-checkmark" size={12} color="#fff" />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.headerText}>
+                    <View style={styles.nameRow}>
+                      <Text style={styles.headerName}>{otherUser?.display_name ?? '—'}</Text>
+                      {guardian && (
+                        <View style={styles.guardianBadge}>
+                          <Ionicons name="heart" size={12} color="#fff" />
+                          <Text style={styles.guardianText}>ولي</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.headerMeta} numberOfLines={1}>
+                      {formatUserLocation(otherUser)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                <View style={styles.headerActions}>
+                  <TouchableOpacity 
+                    style={styles.headerActionBtn}
+                    onPress={() => {
+                      feedback.buttonPress();
+                      setCardVisible(true);
+                    }}
+                  >
+                    <Ionicons name="person-outline" size={20} color={colors.accent} />
+                    <Text style={styles.headerActionText}>التفاصيل</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={styles.headerReportBtn}
+                    onPress={handleReport}
+                  >
+                    <Ionicons name="flag-outline" size={20} color="#ef4444" />
+                    <Text style={styles.headerReportText}>إبلاغ</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={styles.headerUnmatchBtn}
+                    onPress={handleUnmatch}
+                  >
+                    <Ionicons name="close-outline" size={20} color="#ef4444" />
+                    <Text style={styles.headerUnmatchText}>إلغاء</Text>
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.headerAction}>
-                  <Ionicons name="id-card" size={18} color={colors.accent} />
-                  <Text style={styles.headerActionText}>عرض البطاقة</Text>
-                </View>
-              </TouchableOpacity>
+              </View>
             )}
 
             {guardian && (
@@ -210,9 +346,6 @@ export default function ChatScreen() {
 
             <View style={[styles.inputWrapper, { paddingBottom: Math.max(insets.bottom, spacing(1.5)) }]}>
               <View style={styles.composer}>
-                <TouchableOpacity style={styles.attach}>
-                  <Ionicons name="image" size={20} color={colors.text} />
-                </TouchableOpacity>
                 <TextInput
                   style={styles.input}
                   value={text}
@@ -241,11 +374,10 @@ export default function ChatScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      <MatchPreviewModal
+      <ProfileDetailModal
         visible={cardVisible}
         onClose={() => setCardVisible(false)}
         user={otherUser}
-        baseUrl={baseUrl}
       />
     </GradientBackground>
   );
@@ -255,44 +387,128 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   flex: { flex: 1 },
   header: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: colors.card,
     borderRadius: radii.xl,
-    padding: spacing(1.5),
+    padding: spacing(2),
     marginHorizontal: spacing(2),
     marginTop: 0,
-    marginBottom: spacing(0.75),
-    ...shadows.soft,
+    marginBottom: spacing(1),
+    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  headerMain: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    marginBottom: spacing(1.5),
+  },
+  avatarContainer: {
+    position: 'relative',
+  },
+  guardianIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: colors.info,
+    borderRadius: radii.pill,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.card,
   },
   headerText: {
     flex: 1,
     marginHorizontal: spacing(1.5),
   },
+  nameRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: spacing(1),
+  },
   headerName: {
     color: colors.text,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     textAlign: 'right',
+    flex: 1,
+  },
+  guardianBadge: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing(1),
+    paddingVertical: spacing(0.5),
+    borderRadius: radii.pill,
+    gap: spacing(0.25),
+  },
+  guardianText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
   },
   headerMeta: {
     color: colors.subtext,
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: spacing(0.25),
     textAlign: 'right',
   },
-  headerAction: {
+  headerActions: {
+    flexDirection: 'row-reverse',
+    gap: spacing(1),
+  },
+  headerActionBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing(0.5),
-    paddingHorizontal: spacing(1),
+    paddingVertical: spacing(1),
+    paddingHorizontal: spacing(1.5),
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flex: 1,
+    ...shadows.soft,
   },
   headerActionText: {
     color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
+    marginRight: spacing(0.5),
+  },
+  headerReportBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing(1),
+    paddingHorizontal: spacing(1.5),
+    borderRadius: radii.lg,
+    backgroundColor: '#ef444410',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    ...shadows.soft,
+  },
+  headerReportText: {
+    color: '#ef4444',
+    fontSize: 12,
+    fontWeight: '600',
+    marginRight: spacing(0.5),
+  },
+  headerUnmatchBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing(1),
+    paddingHorizontal: spacing(1.5),
+    borderRadius: radii.lg,
+    backgroundColor: '#ef444410',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    ...shadows.soft,
+  },
+  headerUnmatchText: {
+    color: '#ef4444',
     fontSize: 12,
     fontWeight: '600',
     marginRight: spacing(0.5),
@@ -400,16 +616,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  attach: {
-    backgroundColor: colors.surface,
-    width: 44,
-    height: 44,
-    borderRadius: radii.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
 });
 

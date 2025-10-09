@@ -49,6 +49,7 @@ export default function EnhancedDiscoveryScreen() {
   const [locBusy, setLocBusy] = useState(false);
   const [needsNotifications, setNeedsNotifications] = useState(false);
   const [notifBusy, setNotifBusy] = useState(false);
+  const [accountHidden, setAccountHidden] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const [appState, setAppState] = useState(AppState.currentState);
@@ -125,6 +126,14 @@ export default function EnhancedDiscoveryScreen() {
         try {
           const userRes = await api.get('/users/me');
           setCurrentUser(userRes.data);
+          
+          // Check if account is hidden (discoverable = false)
+          if (userRes.data.discoverable === false) {
+            setAccountHidden(true);
+            return; // Don't load discovery if account is hidden
+          } else {
+            setAccountHidden(false);
+          }
         } catch (e) {
           console.error('Failed to load current user:', e);
         }
@@ -198,6 +207,18 @@ export default function EnhancedDiscoveryScreen() {
       // If app became active, check permissions again
       if (prevAppState !== 'active' && nextAppState === 'active') {
         if (!useApiState.getState().currentUserId) return; // if logged out, ignore
+        
+        // Re-check if account is hidden
+        try {
+          const userRes = await api.get('/users/me');
+          if (userRes.data.discoverable === false) {
+            setAccountHidden(true);
+            return; // Don't proceed if account is hidden
+          } else {
+            setAccountHidden(false);
+          }
+        } catch {}
+        
         // Always refresh device location on resume; if enabled, reload profiles
         try {
           const locPerm = await Location.getForegroundPermissionsAsync();
@@ -785,6 +806,46 @@ export default function EnhancedDiscoveryScreen() {
   }
 
   // Location required state
+  // Show account hidden message if user disabled discovery
+  if (accountHidden) {
+    return (
+      <GradientBackground>
+        <SafeAreaView style={styles.wrapper} edges={['top', 'left', 'right']}>
+          <View style={styles.container}>
+            <View style={styles.locationRequiredContainer}>
+              {/* Icon */}
+              <View style={styles.locationRequiredIconWrapper}>
+                <View style={styles.locationRequiredIconCircle}>
+                  <Ionicons name="eye-off" size={64} color={colors.accent} />
+                </View>
+              </View>
+
+              {/* Content */}
+              <View style={styles.locationRequiredContent}>
+                <Text style={styles.locationRequiredTitle} allowFontScaling={false}>
+                  حسابك مخفي
+                </Text>
+                <Text style={styles.locationRequiredDescription} allowFontScaling={false}>
+                  قمت بإخفاء حسابك من الظهور. يرجى تفعيل الظهور من الإعدادات لاستخدام الاستكشاف
+                </Text>
+              </View>
+
+              {/* Button to go to settings */}
+              <TouchableOpacity 
+                onPress={() => navigation.navigate('Settings')} 
+                style={styles.enableLocationBtn}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="settings" size={22} color="#fff" />
+                <Text style={styles.enableLocationBtnText} allowFontScaling={false}>الذهاب إلى الإعدادات</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </SafeAreaView>
+      </GradientBackground>
+    );
+  }
+
   if (needsLocation) {
     return (
       <GradientBackground>
@@ -1026,14 +1087,14 @@ export default function EnhancedDiscoveryScreen() {
                           onPress={() => setCurrentPhotoIndex((prev) => Math.max(0, prev - 1))}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="chevron-forward" size={26} color="#fff" />
+                          <Ionicons name="chevron-back" size={26} color="#fff" />
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[styles.navArrow, styles.navArrowRight]}
                           onPress={() => setCurrentPhotoIndex((prev) => Math.min(currentProfile.photos.length - 1, prev + 1))}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="chevron-back" size={26} color="#fff" />
+                          <Ionicons name="chevron-forward" size={26} color="#fff" />
                         </TouchableOpacity>
 
                         {/* Photo indicators */}

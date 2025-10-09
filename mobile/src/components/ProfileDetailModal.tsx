@@ -46,9 +46,26 @@ const originFlagMap: Record<string, string> = {
 };
 
 function withOriginFlag(origin?: string | null): string | undefined {
-  if (!origin) return origin ?? undefined;
+  if (!origin || origin === 'null' || origin === 'undefined') return undefined;
+  
+  // Handle JSON array format (e.g., "[\"السعودية 🇸🇦\"]" or "[\"السعودية 🇸🇦\", \"مصر 🇪🇬\"]")
+  try {
+    const parsed = JSON.parse(origin);
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return undefined;
+      // Filter out any null/undefined values and return comma-separated list
+      const validEntries = parsed.filter(item => item && typeof item === 'string' && item.trim());
+      if (validEntries.length === 0) return undefined;
+      return validEntries.join('، ');
+    }
+  } catch {
+    // Not JSON, continue with string processing
+  }
+  
   // If origin already contains an emoji, return as is
   if (/\p{Extended_Pictographic}/u.test(origin)) return origin;
+  
+  // Otherwise add the flag emoji if we have a mapping
   const flag = originFlagMap[origin];
   return flag ? `${origin} ${flag}` : origin;
 }
@@ -104,19 +121,25 @@ export default function ProfileDetailModal({
   const icebreakers = user.icebreaker_questions ? JSON.parse(user.icebreaker_questions) : [];
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={[styles.modalContainer, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, spacing(2)) }]}> 
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => {
-            feedback.buttonPress();
-            onClose();
-          }} style={styles.closeButton}>
-            <Ionicons name="chevron-down" size={32} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>الملف الشخصي</Text>
-          <View style={{ width: 40 }} />
-        </View>
+    <Modal 
+      visible={visible} 
+      animationType="slide" 
+      onRequestClose={onClose}
+      presentationStyle="fullScreen"
+    >
+      <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom', 'left', 'right']}>
+        <View style={styles.safeArea}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => {
+              feedback.buttonPress();
+              onClose();
+            }} style={styles.closeButton}>
+              <Ionicons name="chevron-down" size={32} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>الملف الشخصي</Text>
+            <View style={{ width: 40 }} />
+          </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {/* Photos */}
@@ -194,8 +217,8 @@ export default function ProfileDetailModal({
             {(user.city || user.country) && (
               <InfoRow icon="location" text={[user.city, user.country].filter(Boolean).join(', ')} />
             )}
-            {user.ethnicity && (
-              <InfoRow icon="globe" text={withOriginFlag(user.ethnicity) || ''} label="الأصل" />
+            {user.ethnicity && withOriginFlag(user.ethnicity) && (
+              <InfoRow icon="globe" text={withOriginFlag(user.ethnicity)!} label="الأصل" />
             )}
             {user.height_cm && (
               <InfoRow icon="resize" text={`${user.height_cm} سم`} label="الطول" />
@@ -273,35 +296,36 @@ export default function ProfileDetailModal({
           <View style={{ height: spacing(10) }} />
         </ScrollView>
 
-        {/* Action Buttons */}
-        {(onLike || onPass || onSuperLike) && (
-          <View style={styles.actionBar}>
-            {onPass && (
-              <TouchableOpacity onPress={() => {
-                feedback.buttonPress();
-                onPass();
-              }} style={[styles.actionButton, styles.passButton]}>
-                <Ionicons name="close" size={32} color="#fff" />
-              </TouchableOpacity>
-            )}
-            {onSuperLike && (
-              <TouchableOpacity onPress={() => {
-                feedback.buttonPress();
-                onSuperLike();
-              }} style={[styles.actionButton, styles.superButton]}>
-                <Ionicons name="star" size={28} color="#fff" />
-              </TouchableOpacity>
-            )}
-            {onLike && (
-              <TouchableOpacity onPress={() => {
-                feedback.buttonPress();
-                onLike();
-              }} style={[styles.actionButton, styles.likeButton]}>
-                <Ionicons name="heart" size={32} color="#fff" />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+          {/* Action Buttons */}
+          {(onLike || onPass || onSuperLike) && (
+            <View style={styles.actionBar}>
+              {onPass && (
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  onPass();
+                }} style={[styles.actionButton, styles.passButton]}>
+                  <Ionicons name="close" size={32} color="#fff" />
+                </TouchableOpacity>
+              )}
+              {onSuperLike && (
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  onSuperLike();
+                }} style={[styles.actionButton, styles.superButton]}>
+                  <Ionicons name="star" size={28} color="#fff" />
+                </TouchableOpacity>
+              )}
+              {onLike && (
+                <TouchableOpacity onPress={() => {
+                  feedback.buttonPress();
+                  onLike();
+                }} style={[styles.actionButton, styles.likeButton]}>
+                  <Ionicons name="heart" size={32} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
       </SafeAreaView>
     </Modal>
   );
@@ -343,6 +367,11 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: colors.bg,
+    paddingTop: spacing(2),
+    paddingBottom: spacing(2),
+  },
+  safeArea: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row-reverse',

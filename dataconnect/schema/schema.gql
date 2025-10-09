@@ -1,0 +1,63 @@
+type User @table {
+  email: String!
+  passwordHash: String!
+  displayName: String!
+  gender: String!
+  dateOfBirth: Date!
+  city: String!
+  country: String!
+  religiousCommitment: String!
+  createdAt: Timestamp!
+  photoUrl: String
+  education: String
+  profession: String
+  height: Int
+  maritalStatus: String
+  familyBackground: String
+  bio: String
+  lastActiveAt: Timestamp
+}
+
+type ProfilePreference @table {
+  user: User!
+  createdAt: Timestamp!
+  preferredGender: String
+  preferredMinAge: Int
+  preferredMaxAge: Int
+  preferredCity: String
+  preferredCountry: String
+  preferredReligiousCommitment: String
+  preferredEducation: String
+  preferredProfession: String
+  preferredMaritalStatus: String
+}
+
+type Photo @table {
+  user: User!
+  url: String!
+  isProfilePic: Boolean!
+  createdAt: Timestamp!
+  caption: String
+}
+
+type Interest @table(key: ["senderUser", "receiverUser"]) {
+  senderUser: User!
+  receiverUser: User!
+  status: String!
+  createdAt: Timestamp!
+}
+
+type Conversation @table(key: ["user1", "user2"]) {
+  user1: User!
+  user2: User!
+  createdAt: Timestamp!
+  lastMessageAt: Timestamp!
+}
+
+type Message @table {
+  conversation: Conversation!
+  sender: User!
+  content: String!
+  sentAt: Timestamp!
+  readAt: Timestamp
+}

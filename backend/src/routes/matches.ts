@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { AuthedRequest } from '../types';
+import { deleteFirestoreConversation } from '../services/firebase-sync';
 
 const router = Router();
 
@@ -27,7 +28,29 @@ router.get('/', async (req: AuthedRequest, res, next) => {
       },
       orderBy: { last_message_at: 'desc' },
     });
-    res.json({ matches });
+
+    // Fetch last message text for each match
+    const matchesWithLastMessage = await Promise.all(
+      matches.map(async (match) => {
+        if (match.last_message_at) {
+          const lastMessage = await prisma.message.findFirst({
+            where: { match_id: match.id },
+            orderBy: { created_at: 'desc' },
+            select: { text: true },
+          });
+          return {
+            ...match,
+            last_message_text: lastMessage?.text || null,
+          };
+        }
+        return {
+          ...match,
+          last_message_text: null,
+        };
+      })
+    );
+
+    res.json({ matches: matchesWithLastMessage });
   } catch (e) {
     next(e);
   }
@@ -81,6 +104,15 @@ router.delete('/:id', async (req: AuthedRequest, res, next) => {
     
     // Delete the match
     await prisma.match.delete({ where: { id } });
+    
+    // Delete Firestore conversation
+    try {
+      await deleteFirestoreConversation(id);
+      console.log(`✅ Firestore conversation ${id} deleted`);
+    } catch (error) {
+      console.error('❌ Error deleting Firestore conversation:', error);
+      // Don't fail the request if Firebase sync fails
+    }
     
     console.log(`✅ Unmatch: User ${me.id} unmatched from match ${id}`);
     res.json({ ok: true, message: 'Unmatched successfully' });
